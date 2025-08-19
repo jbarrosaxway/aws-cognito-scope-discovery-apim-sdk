@@ -334,7 +334,7 @@ def showNextSteps() {
 
 // Helper function to create project directory structure
 def createProjectStructure(def projectPath) {
-    def metaInfDir = new File(projectPath, "META-INF/types/Entity/Filter/AWSFilter")
+    def metaInfDir = new File(projectPath, "META-INF/types/Entity/Filter")
     def systemDir = new File(projectPath, "System")
     
     metaInfDir.mkdirs()
