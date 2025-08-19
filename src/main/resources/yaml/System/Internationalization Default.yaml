@@ -1,10 +1,12 @@
 type: InternationalizationFilter
 name: Internationalization Default
 description: Default internationalization settings for the project
-filters:
-  - type: CognitoScopeDiscoveryFilter
-    name: Cognito Scope Discovery Filter
-    description: Discovers AWS Cognito scopes dynamically and maps them to full scope format
-    logFatal: Error in the Cognito Scope Discovery filter. Error: ${circuit.exception}
-    logFailure: Failed in the Cognito Scope Discovery filter
-    logSuccess: Success in the Cognito Scope Discovery filter
+key:
+  type: Internationalization
+  id:
+    name: Internationalization Default
+fval:
+  type: CognitoScopeDiscoveryFilter
+  logFatal: Error in the Cognito Scope Discovery filter. Error: ${circuit.exception}
+  logFailure: Failed in the Cognito Scope Discovery filter
+  logSuccess: Success in the Cognito Scope Discovery filter
