@@ -1,54 +1,53 @@
 package com.axway.aws.cognito;
 
-import com.vordel.circuit.DefaultFilter;
-import com.vordel.common.util.PropDef;
-import com.vordel.config.ConfigContext;
-import com.vordel.es.EntityStoreException;
-import com.vordel.mime.Body;
-import com.vordel.mime.HeaderSet;
-
 /**
- * Filtro para descoberta dinâmica de scopes do AWS Cognito
+ * Filtro para descoberta de scopes do AWS Cognito
  * 
- * Este filtro consulta o Cognito para descobrir automaticamente quais scopes
- * estão disponíveis para um determinado clientId, eliminando a necessidade
- * de mapeamentos fixos de scopes.
+ * Esta classe define as propriedades e configurações do filtro
+ * para descoberta dinâmica de scopes do Cognito.
  */
-public class CognitoScopeDiscoveryFilter extends DefaultFilter {
+public class CognitoScopeDiscoveryFilter {
 
-    @Override
-    protected final void setDefaultPropertyDefs() {
-        // Propriedades de entrada
-        this.reqProps.add(new PropDef("content.body", Body.class));
-        this.reqProps.add(new PropDef("http.headers", HeaderSet.class));
-        this.reqProps.add(new PropDef("cognito.scopes.input", String.class));
-        
-        // Propriedades geradas
-        this.genProps.add(new PropDef("cognito.scopes.available", String.class));
-        this.genProps.add(new PropDef("cognito.scopes.mapped", String.class));
-        this.genProps.add(new PropDef("cognito.scopes.prefixes", String.class));
-        this.genProps.add(new PropDef("cognito.scopes.count", Integer.class));
-        this.genProps.add(new PropDef("cognito.scopes.input_processed", String.class));
-        this.genProps.add(new PropDef("cognito.scopes.input_mapped", String.class));
-        this.genProps.add(new PropDef("cognito.scopes.error", String.class));
-        this.genProps.add(new PropDef("cognito.scopes.error_description", String.class));
-        this.genProps.add(new PropDef("cognito.scopes.cache_hit", Boolean.class));
-        this.genProps.add(new PropDef("cognito.scopes.last_updated", String.class));
+    // Propriedades de entrada
+    public static final String PROP_USER_POOL_ID = "userPoolId";
+    public static final String PROP_CLIENT_ID = "clientId";
+    public static final String PROP_AWS_REGION = "awsRegion";
+    public static final String PROP_CREDENTIAL_TYPE = "credentialType";
+    public static final String PROP_AWS_CREDENTIAL = "awsCredential";
+    public static final String PROP_CREDENTIALS_FILE_PATH = "credentialsFilePath";
+    public static final String PROP_CLIENT_CONFIGURATION = "clientConfiguration";
+    public static final String PROP_SCOPES_INPUT = "scopesInput";
+
+    // Propriedades de saída
+    public static final String PROP_SCOPES_AVAILABLE = "cognito.scopes.available";
+    public static final String PROP_SCOPES_MAPPED = "cognito.scopes.mapped";
+    public static final String PROP_SCOPES_PREFIXES = "cognito.scopes.prefixes";
+    public static final String PROP_SCOPES_COUNT = "cognito.scopes.count";
+    public static final String PROP_SCOPES_INPUT_PROCESSED = "cognito.scopes.input_processed";
+    public static final String PROP_SCOPES_INPUT_MAPPED = "cognito.scopes.input_mapped";
+    public static final String PROP_SCOPES_ERROR = "cognito.scopes.error";
+    public static final String PROP_SCOPES_ERROR_DESCRIPTION = "cognito.scopes.error_description";
+    public static final String PROP_SCOPES_CACHE_HIT = "cognito.scopes.cache_hit";
+    public static final String PROP_SCOPES_LAST_UPDATED = "cognito.scopes.last_updated";
+
+    /**
+     * Obtém o nome do filtro
+     */
+    public String getFilterName() {
+        return "AWS Cognito Scope Discovery Filter";
     }
 
-    @Override
-    public void configure(ConfigContext ctx, com.vordel.es.Entity entity) throws EntityStoreException {
-        super.configure(ctx, entity);
+    /**
+     * Obtém a descrição do filtro
+     */
+    public String getFilterDescription() {
+        return "Descobre dinamicamente scopes disponíveis no AWS Cognito para um determinado clientId";
     }
 
-    @Override
-    public Class<CognitoScopeDiscoveryProcessor> getMessageProcessorClass() {
-        return CognitoScopeDiscoveryProcessor.class;
-    }
-
-    public Class getConfigPanelClass() throws ClassNotFoundException {
-        // Avoid any compile or runtime dependencies on SWT and other UI
-        // libraries by lazily loading the class when required.
-        return Class.forName("com.axway.aws.cognito.CognitoScopeDiscoveryFilterUI");
+    /**
+     * Obtém a categoria do filtro
+     */
+    public String getFilterCategory() {
+        return "AWS Cognito";
     }
 }

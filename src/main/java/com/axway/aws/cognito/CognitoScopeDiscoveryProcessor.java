@@ -1,50 +1,45 @@
 package com.axway.aws.cognito;
 
-import com.amazonaws.auth.AWSCredentialsProvider;
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
-import com.amazonaws.auth.PropertiesFileCredentialsProvider;
-import com.amazonaws.client.builder.AwsClientBuilder;
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
-import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProviderClientBuilder;
-import com.amazonaws.services.cognitoidp.model.DescribeUserPoolClientRequest;
-import com.amazonaws.services.cognitoidp.model.DescribeUserPoolClientResult;
-import com.amazonaws.services.cognitoidp.model.ListResourceServersRequest;
-import com.amazonaws.services.cognitoidp.model.ListResourceServersResult;
-import com.amazonaws.services.cognitoidp.model.ResourceServerDescription;
-import com.amazonaws.services.cognitoidp.model.UserPoolClientDescription;
-import com.vordel.circuit.CircuitAbortException;
-import com.vordel.circuit.Message;
-import com.vordel.circuit.MessageProcessor;
-import com.vordel.config.ConfigContext;
-import com.vordel.es.Entity;
-import com.vordel.es.EntityStoreException;
-import com.vordel.trace.Trace;
-import com.vordel.util.Selector;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.amazonaws.ClientConfiguration;
+import com.amazonaws.Protocol;
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.AWSCredentialsProvider;
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+import com.amazonaws.auth.PropertiesFileCredentialsProvider;
+import com.amazonaws.auth.WebIdentityTokenCredentialsProvider;
+import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
+import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProviderClientBuilder;
+import com.amazonaws.services.cognitoidp.model.DescribeUserPoolClientRequest;
+import com.amazonaws.services.cognitoidp.model.DescribeUserPoolClientResult;
+import com.amazonaws.services.cognitoidp.model.ListResourceServersRequest;
+import com.amazonaws.services.cognitoidp.model.ListResourceServersResult;
+import com.amazonaws.services.cognitoidp.model.ResourceServerType;
+import com.amazonaws.services.cognitoidp.model.ResourceServerScopeType;
+import com.amazonaws.services.cognitoidp.model.UserPoolClientType;
+
 /**
  * Processador para descoberta dinâmica de scopes do AWS Cognito
  * 
- * Este processador consulta o Cognito para descobrir automaticamente quais scopes
+ * Esta classe consulta o Cognito para descobrir automaticamente quais scopes
  * estão disponíveis para um determinado clientId, eliminando a necessidade
  * de mapeamentos fixos de scopes.
  */
-public class CognitoScopeDiscoveryProcessor implements MessageProcessor {
+public class CognitoScopeDiscoveryProcessor {
 
-    // Selectors para configuração
-    protected Selector<String> userPoolId;
-    protected Selector<String> clientId;
-    protected Selector<String> awsRegion;
-    protected Selector<String> credentialType;
-    protected Selector<String> awsCredential;
-    protected Selector<String> clientConfiguration;
-    protected Selector<String> credentialsFilePath;
-    protected Selector<String> scopesInput;
+    // Configuração
+    private String userPoolId;
+    private String clientId;
+    private String awsRegion;
+    private String credentialType;
+    private String awsCredential;
+    private String credentialsFilePath;
 
     // Cliente Cognito
     private AWSCognitoIdentityProvider cognitoClient;
@@ -53,281 +48,209 @@ public class CognitoScopeDiscoveryProcessor implements MessageProcessor {
     private static final Map<String, CacheEntry> scopeCache = new ConcurrentHashMap<>();
     private static final long CACHE_EXPIRATION_MS = 30 * 60 * 1000; // 30 minutos
 
-    @Override
-    public void filterAttached(ConfigContext ctx, Entity entity) throws EntityStoreException {
-        // Inicializar selectors
-        this.userPoolId = new Selector(entity.getStringValue("userPoolId"), String.class);
-        this.clientId = new Selector(entity.getStringValue("clientId"), String.class);
-        this.awsRegion = new Selector(entity.getStringValue("awsRegion"), String.class);
-        this.credentialType = new Selector(entity.getStringValue("credentialType"), String.class);
-        this.awsCredential = new Selector(entity.getStringValue("awsCredential"), String.class);
-        this.clientConfiguration = new Selector(entity.getStringValue("clientConfiguration"), String.class);
-        this.credentialsFilePath = new Selector(entity.getStringValue("credentialsFilePath"), String.class);
-        this.scopesInput = new Selector(entity.getStringValue("scopesInput"), String.class);
+    private static class CacheEntry {
+        private final Map<String, String> scopePrefixes;
+        private final long timestamp;
 
-        // Obter configuração do cliente (seguindo padrão Lambda exatamente)
-        Entity clientConfig = ctx.getEntity(entity.getReferenceValue("clientConfiguration"));
-        
-        // Inicializar cliente Cognito
-        initializeCognitoClient(ctx, entity, clientConfig);
+        public CacheEntry(Map<String, String> scopePrefixes) {
+            this.scopePrefixes = scopePrefixes;
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        public Map<String, String> getScopePrefixes() { return scopePrefixes; }
+        public long getTimestamp() { return timestamp; }
+        public boolean isExpired() { return System.currentTimeMillis() - timestamp > CACHE_EXPIRATION_MS; }
+        public java.time.Instant getLastUpdated() { return java.time.Instant.ofEpochMilli(timestamp); }
     }
 
-    @Override
-    public boolean invoke(com.vordel.circuit.Circuit circuit, Message message) throws CircuitAbortException {
+    public CognitoScopeDiscoveryProcessor() {
+    }
+
+    /**
+     * Configura o processador
+     */
+    public void configure(String userPoolId, String clientId, String awsRegion, 
+                         String credentialType, String awsCredential, String credentialsFilePath) {
+        this.userPoolId = userPoolId;
+        this.clientId = clientId;
+        this.awsRegion = awsRegion;
+        this.credentialType = credentialType;
+        this.awsCredential = awsCredential;
+        this.credentialsFilePath = credentialsFilePath;
+        
+        initializeCognitoClient();
+    }
+
+    /**
+     * Inicializa o cliente Cognito
+     */
+    private void initializeCognitoClient() {
         try {
-            Trace.info("Iniciando descoberta de scopes Cognito");
-            
-            // Obter valores dos selectors
-            String userPoolIdValue = userPoolId.substitute(message);
-            String clientIdValue = clientId.substitute(message);
-            String scopesInputValue = scopesInput.substitute(message);
-            
-            if (userPoolIdValue == null || userPoolIdValue.trim().isEmpty()) {
+            ClientConfiguration clientConfig = new ClientConfiguration();
+            AWSCredentialsProvider credentialsProvider = createCredentialsProvider();
+            String region = getRegion();
+
+            this.cognitoClient = AWSCognitoIdentityProviderClientBuilder.standard()
+                    .withCredentials(credentialsProvider)
+                    .withRegion(region)
+                    .withClientConfiguration(clientConfig)
+                    .build();
+
+            System.out.println("Cliente Cognito inicializado com sucesso");
+
+        } catch (Exception e) {
+            System.err.println("Erro ao inicializar cliente Cognito: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Cria o provider de credenciais AWS
+     */
+    private AWSCredentialsProvider createCredentialsProvider() throws Exception {
+        if ("iam".equalsIgnoreCase(credentialType)) {
+            System.out.println("Using IAM Role credentials - WebIdentityTokenCredentialsProvider");
+            return new WebIdentityTokenCredentialsProvider();
+        } else if ("file".equalsIgnoreCase(credentialType)) {
+            if (credentialsFilePath == null || credentialsFilePath.trim().isEmpty()) {
+                throw new IllegalArgumentException("credentialsFilePath é obrigatório quando credentialType é 'file'");
+            }
+            System.out.println("Using AWS credentials file: " + credentialsFilePath);
+            return new PropertiesFileCredentialsProvider(credentialsFilePath);
+        } else if ("local".equalsIgnoreCase(credentialType)) {
+            System.out.println("Using local AWS credentials");
+            return new DefaultAWSCredentialsProviderChain();
+        } else {
+            throw new IllegalArgumentException("Tipo de credencial inválido: " + credentialType);
+        }
+    }
+
+    private String getRegion() {
+        if (awsRegion != null && !awsRegion.trim().isEmpty()) {
+            return awsRegion;
+        }
+        return "us-east-1"; // Default
+    }
+
+    /**
+     * Executa a descoberta de scopes
+     */
+    public Map<String, Object> discoverScopes(String scopesInput) {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            if (userPoolId == null || userPoolId.trim().isEmpty()) {
                 throw new IllegalArgumentException("userPoolId é obrigatório");
             }
-            
-            if (clientIdValue == null || clientIdValue.trim().isEmpty()) {
+            if (clientId == null || clientId.trim().isEmpty()) {
                 throw new IllegalArgumentException("clientId é obrigatório");
             }
 
-            // Verificar cache primeiro
-            String cacheKey = userPoolIdValue + ":" + clientIdValue;
+            String cacheKey = userPoolId + ":" + clientId;
             CacheEntry cachedEntry = scopeCache.get(cacheKey);
-            
+
             if (cachedEntry != null && !cachedEntry.isExpired()) {
-                Trace.info("Usando scopes do cache para " + cacheKey);
-                setOutputProperties(message, cachedEntry);
-                message.put("cognito.scopes.cache_hit", true);
-                return true;
+                System.out.println("Usando scopes do cache para " + cacheKey);
+                setOutputProperties(result, cachedEntry);
+                result.put("cognito.scopes.cache_hit", true);
+                return result;
             }
 
-            // Descobrir scopes do Cognito
-            Trace.info("Descobrindo scopes do Cognito para userPoolId: " + userPoolIdValue + ", clientId: " + clientIdValue);
-            
-            Map<String, String> scopePrefixes = discoverScopes(userPoolIdValue, clientIdValue);
-            
-            // Criar entrada do cache
+            System.out.println("Descobrindo scopes do Cognito para userPoolId: " + userPoolId + ", clientId: " + clientId);
+
+            Map<String, String> scopePrefixes = discoverScopesFromCognito(userPoolId, clientId);
+
             CacheEntry newEntry = new CacheEntry(scopePrefixes);
             scopeCache.put(cacheKey, newEntry);
-            
-            // Definir propriedades de saída
-            setOutputProperties(message, newEntry);
-            message.put("cognito.scopes.cache_hit", false);
-            
-            // Processar scopes de entrada se fornecidos
-            if (scopesInputValue != null && !scopesInputValue.trim().isEmpty()) {
-                String processedInput = processInputScopes(scopesInputValue, scopePrefixes);
-                String mappedInput = mapInputScopes(scopesInputValue, scopePrefixes);
-                
-                message.put("cognito.scopes.input_processed", processedInput);
-                message.put("cognito.scopes.input_mapped", mappedInput);
-                
-                Trace.info("Scopes de entrada processados: " + processedInput);
-                Trace.info("Scopes de entrada mapeados: " + mappedInput);
+
+            setOutputProperties(result, newEntry);
+            result.put("cognito.scopes.cache_hit", false);
+
+            if (scopesInput != null && !scopesInput.trim().isEmpty()) {
+                String processedInput = processInputScopes(scopesInput);
+                String mappedInput = mapInputScopes(scopesInput, scopePrefixes);
+
+                result.put("cognito.scopes.input_processed", processedInput);
+                result.put("cognito.scopes.input_mapped", mappedInput);
+
+                System.out.println("Scopes de entrada processados: " + processedInput);
+                System.out.println("Scopes de entrada mapeados: " + mappedInput);
             } else {
-                message.put("cognito.scopes.input_processed", "");
-                message.put("cognito.scopes.input_mapped", "");
-                Trace.info("Nenhum scope de entrada fornecido");
+                result.put("cognito.scopes.input_processed", "");
+                result.put("cognito.scopes.input_mapped", "");
+                System.out.println("Nenhum scope de entrada fornecido");
             }
-            
-            Trace.info("Descoberta de scopes Cognito concluída com sucesso");
-            return true;
-            
+
+            System.out.println("Descoberta de scopes Cognito concluída com sucesso");
+            result.put("success", true);
+
         } catch (Exception e) {
-            Trace.error("Erro na descoberta de scopes Cognito: " + e.getMessage(), e);
-            message.put("cognito.scopes.error", "ERROR");
-            message.put("cognito.scopes.error_description", e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Inicializa o cliente Cognito com as credenciais e configuração apropriadas
-     */
-    private void initializeCognitoClient(ConfigContext ctx, Entity entity, Entity clientConfigEntity) throws EntityStoreException {
-        try {
-            // Criar configuração do cliente
-            com.amazonaws.ClientConfiguration clientConfig = createClientConfiguration(clientConfigEntity);
-            
-            // Criar provider de credenciais
-            AWSCredentialsProvider credentialsProvider = createCredentialsProvider(entity);
-            
-            // Criar cliente Cognito
-            this.cognitoClient = AWSCognitoIdentityProviderClientBuilder.standard()
-                    .withCredentials(credentialsProvider)
-                    .withClientConfiguration(clientConfig)
-                    .withRegion(awsRegion.getDefaultValue())
-                    .build();
-            
-            Trace.info("Cliente Cognito inicializado com sucesso");
-            
-        } catch (Exception e) {
-            Trace.error("Erro ao inicializar cliente Cognito: " + e.getMessage(), e);
-            throw new EntityStoreException("Falha ao inicializar cliente Cognito", e);
-        }
-    }
-
-    /**
-     * Cria configuração do cliente AWS baseada na entidade referenciada
-     */
-    private com.amazonaws.ClientConfiguration createClientConfiguration(Entity clientConfigEntity) {
-        com.amazonaws.ClientConfiguration config = new com.amazonaws.ClientConfiguration();
-        
-        if (clientConfigEntity != null) {
-            // Ler propriedades da entidade AWSClientConfiguration
-            String connectionTimeout = clientConfigEntity.getStringValue("connectionTimeout");
-            String socketTimeout = clientConfigEntity.getStringValue("socketTimeout");
-            String maxErrorRetry = clientConfigEntity.getStringValue("maxErrorRetry");
-            String maxConnections = clientConfigEntity.getStringValue("maxConnections");
-            String protocol = clientConfigEntity.getStringValue("protocol");
-            String userAgent = clientConfigEntity.getStringValue("userAgent");
-            String proxyHost = clientConfigEntity.getStringValue("proxyHost");
-            String proxyPort = clientConfigEntity.getStringValue("proxyPort");
-            String proxyUsername = clientConfigEntity.getStringValue("proxyUsername");
-            String proxyPassword = clientConfigEntity.getStringValue("proxyPassword");
-            String proxyDomain = clientConfigEntity.getStringValue("proxyDomain");
-            String proxyWorkstation = clientConfigEntity.getStringValue("proxyWorkstation");
-            String socketSendBufferSizeHint = clientConfigEntity.getStringValue("socketSendBufferSizeHint");
-            String socketReceiveBufferSizeHint = clientConfigEntity.getStringValue("socketReceiveBufferSizeHint");
-            
-            // Aplicar configurações se fornecidas
-            if (connectionTimeout != null && !connectionTimeout.trim().isEmpty()) {
-                config.setConnectionTimeout(Integer.parseInt(connectionTimeout.trim()));
-            }
-            if (socketTimeout != null && !socketTimeout.trim().isEmpty()) {
-                config.setSocketTimeout(Integer.parseInt(socketTimeout.trim()));
-            }
-            if (maxErrorRetry != null && !maxErrorRetry.trim().isEmpty()) {
-                config.setMaxErrorRetry(Integer.parseInt(maxErrorRetry.trim()));
-            }
-            if (maxConnections != null && !maxConnections.trim().isEmpty()) {
-                config.setMaxConnections(Integer.parseInt(maxConnections.trim()));
-            }
-            if (protocol != null && !protocol.trim().isEmpty()) {
-                config.setProtocol(com.amazonaws.Protocol.valueOf(protocol.trim().toUpperCase()));
-            }
-            if (userAgent != null && !userAgent.trim().isEmpty()) {
-                config.setUserAgent(userAgent.trim());
-            }
-            if (proxyHost != null && !proxyHost.trim().isEmpty()) {
-                config.setProxyHost(proxyHost.trim());
-            }
-            if (proxyPort != null && !proxyPort.trim().isEmpty()) {
-                config.setProxyPort(Integer.parseInt(proxyPort.trim()));
-            }
-            if (proxyUsername != null && !proxyUsername.trim().isEmpty()) {
-                config.setProxyUsername(proxyUsername.trim());
-            }
-            if (proxyPassword != null && !proxyPassword.trim().isEmpty()) {
-                config.setProxyPassword(proxyPassword.trim());
-            }
-            if (proxyDomain != null && !proxyDomain.trim().isEmpty()) {
-                config.setProxyDomain(proxyDomain.trim());
-            }
-            if (proxyWorkstation != null && !proxyWorkstation.trim().isEmpty()) {
-                config.setProxyWorkstation(proxyWorkstation.trim());
-            }
-            if (socketSendBufferSizeHint != null && !socketSendBufferSizeHint.trim().isEmpty()) {
-                config.setSocketSendBufferSizeHint(Integer.parseInt(socketSendBufferSizeHint.trim()));
-            }
-            if (socketReceiveBufferSizeHint != null && !socketReceiveBufferSizeHint.trim().isEmpty()) {
-                config.setSocketReceiveBufferSizeHint(Integer.parseInt(socketReceiveBufferSizeHint.trim()));
-            }
+            System.err.println("Erro na descoberta de scopes Cognito: " + e.getMessage());
+            e.printStackTrace();
+            result.put("success", false);
+            result.put("cognito.scopes.error", "ERROR");
+            result.put("cognito.scopes.error_description", e.getMessage());
         }
         
-        return config;
+        return result;
     }
 
     /**
-     * Cria o provider de credenciais AWS baseado na configuração
+     * Descobre scopes do Cognito
      */
-    private AWSCredentialsProvider createCredentialsProvider(Entity entity) throws EntityStoreException {
-        String credentialTypeValue = credentialType.getDefaultValue();
-        
-        if ("iam".equalsIgnoreCase(credentialTypeValue)) {
-            Trace.info("Usando credenciais IAM Role");
-            return new DefaultAWSCredentialsProviderChain();
-        } else if ("file".equalsIgnoreCase(credentialTypeValue)) {
-            String filePath = credentialsFilePath.getDefaultValue();
-            if (filePath == null || filePath.trim().isEmpty()) {
-                throw new EntityStoreException("credentialsFilePath é obrigatório quando credentialType é 'file'");
-            }
-            Trace.info("Usando credenciais do arquivo: " + filePath);
-            return new PropertiesFileCredentialsProvider(filePath);
-        } else if ("local".equalsIgnoreCase(credentialTypeValue)) {
-            // Para credenciais locais, usar o perfil referenciado
-            String profileName = awsCredential.getDefaultValue();
-            if (profileName == null || profileName.trim().isEmpty()) {
-                throw new EntityStoreException("awsCredential é obrigatório quando credentialType é 'local'");
-            }
-            Trace.info("Usando credenciais locais do perfil: " + profileName);
-            return new DefaultAWSCredentialsProviderChain();
-        } else {
-            throw new EntityStoreException("Tipo de credencial inválido: " + credentialTypeValue);
-        }
-    }
-
-    /**
-     * Descobre scopes disponíveis para o clientId no userPool
-     */
-    private Map<String, String> discoverScopes(String userPoolId, String clientId) throws Exception {
+    private Map<String, String> discoverScopesFromCognito(String userPoolId, String clientId) throws Exception {
         Map<String, String> scopePrefixes = new HashMap<>();
-        
+
         try {
-            // 1. Obter informações do client
             DescribeUserPoolClientRequest clientRequest = new DescribeUserPoolClientRequest()
                     .withUserPoolId(userPoolId)
                     .withClientId(clientId);
-            
+
             DescribeUserPoolClientResult clientResult = cognitoClient.describeUserPoolClient(clientRequest);
-            UserPoolClientDescription client = clientResult.getUserPoolClient();
-            
+            UserPoolClientType client = clientResult.getUserPoolClient();
+
             if (client == null) {
                 throw new Exception("Client não encontrado: " + clientId);
             }
-            
-            Trace.info("Client encontrado: " + client.getClientName());
-            
-            // 2. Listar resource servers para obter prefixos
+
+            System.out.println("Client encontrado: " + client.getClientName());
+
             ListResourceServersRequest serversRequest = new ListResourceServersRequest()
                     .withUserPoolId(userPoolId);
-            
+
             ListResourceServersResult serversResult = cognitoClient.listResourceServers(serversRequest);
-            List<ResourceServerDescription> resourceServers = serversResult.getResourceServers();
-            
-            // 3. Mapear scopes disponíveis
+            List<ResourceServerType> resourceServers = serversResult.getResourceServers();
+
             if (client.getAllowedOAuthScopes() != null) {
                 for (String scope : client.getAllowedOAuthScopes()) {
-                    // Para cada scope, encontrar o resource server correspondente
                     String prefix = findResourceServerPrefix(scope, resourceServers);
                     if (prefix != null) {
                         scopePrefixes.put(scope, prefix);
-                        Trace.info("Scope mapeado: " + scope + " -> " + prefix);
+                        System.out.println("Scope mapeado: " + scope + " -> " + prefix);
                     } else {
-                        // Se não encontrar prefixo, usar scope como está
                         scopePrefixes.put(scope, "");
-                        Trace.info("Scope sem prefixo: " + scope);
+                        System.out.println("Scope sem prefixo: " + scope);
                     }
                 }
             }
-            
-            Trace.info("Total de scopes descobertos: " + scopePrefixes.size());
-            
+
+            System.out.println("Total de scopes descobertos: " + scopePrefixes.size());
+
         } catch (Exception e) {
-            Trace.error("Erro ao descobrir scopes: " + e.getMessage(), e);
+            System.err.println("Erro ao descobrir scopes: " + e.getMessage());
             throw e;
         }
-        
+
         return scopePrefixes;
     }
 
     /**
-     * Encontra o prefixo do resource server para um scope específico
+     * Encontra o prefixo do resource server para um scope
      */
-    private String findResourceServerPrefix(String scope, List<ResourceServerDescription> resourceServers) {
-        for (ResourceServerDescription server : resourceServers) {
+    private String findResourceServerPrefix(String scope, List<ResourceServerType> resourceServers) {
+        for (ResourceServerType server : resourceServers) {
             if (server.getScopes() != null) {
-                for (com.amazonaws.services.cognitoidp.model.ResourceServerScopeType serverScope : server.getScopes()) {
+                for (ResourceServerScopeType serverScope : server.getScopes()) {
                     if (scope.equals(serverScope.getScopeName())) {
                         return server.getIdentifier();
                     }
@@ -338,16 +261,14 @@ public class CognitoScopeDiscoveryProcessor implements MessageProcessor {
     }
 
     /**
-     * Define as propriedades de saída na mensagem
+     * Define as propriedades de saída
      */
-    private void setOutputProperties(Message message, CacheEntry entry) {
+    private void setOutputProperties(Map<String, Object> result, CacheEntry entry) {
         Map<String, String> scopePrefixes = entry.getScopePrefixes();
-        
-        // Lista de scopes disponíveis
+
         List<String> availableScopes = new ArrayList<>(scopePrefixes.keySet());
-        message.put("cognito.scopes.available", String.join(", ", availableScopes));
-        
-        // Mapeamento de scopes
+        result.put("cognito.scopes.available", String.join(", ", availableScopes));
+
         List<String> mappedScopes = new ArrayList<>();
         for (Map.Entry<String, String> entry2 : scopePrefixes.entrySet()) {
             if (entry2.getValue() != null && !entry2.getValue().isEmpty()) {
@@ -356,28 +277,24 @@ public class CognitoScopeDiscoveryProcessor implements MessageProcessor {
                 mappedScopes.add(entry2.getKey());
             }
         }
-        message.put("cognito.scopes.mapped", String.join(", ", mappedScopes));
-        
-        // Lista de prefixos
+        result.put("cognito.scopes.mapped", String.join(", ", mappedScopes));
+
         List<String> prefixes = new ArrayList<>();
         for (String prefix : scopePrefixes.values()) {
             if (prefix != null && !prefix.isEmpty() && !prefixes.contains(prefix)) {
                 prefixes.add(prefix);
             }
         }
-        message.put("cognito.scopes.prefixes", String.join(", ", prefixes));
-        
-        // Contagem de scopes
-        message.put("cognito.scopes.count", availableScopes.size());
-        
-        // Timestamp da última atualização
-        message.put("cognito.scopes.last_updated", entry.getLastUpdated().toString());
+        result.put("cognito.scopes.prefixes", String.join(", ", prefixes));
+
+        result.put("cognito.scopes.count", availableScopes.size());
+        result.put("cognito.scopes.last_updated", entry.getLastUpdated().toString());
     }
 
     /**
-     * Processa scopes de entrada (formato URL encoded) e retorna lista limpa
+     * Processa scopes de entrada
      */
-    private String processInputScopes(String scopesInput, Map<String, String> scopePrefixes) {
+    private String processInputScopes(String scopesInput) {
         if (scopesInput == null || scopesInput.trim().isEmpty()) {
             return "";
         }
@@ -390,9 +307,9 @@ public class CognitoScopeDiscoveryProcessor implements MessageProcessor {
         }
         return String.join(", ", processedScopes);
     }
-    
+
     /**
-     * Mapeia scopes de entrada para scopes completos com prefixos
+     * Mapeia scopes de entrada para scopes completos
      */
     private String mapInputScopes(String scopesInput, Map<String, String> scopePrefixes) {
         if (scopesInput == null || scopesInput.trim().isEmpty()) {
@@ -403,7 +320,7 @@ public class CognitoScopeDiscoveryProcessor implements MessageProcessor {
         for (String scope : scopes) {
             if (!scope.trim().isEmpty()) {
                 String prefix = scopePrefixes.get(scope.trim());
-                if (prefix != null) {
+                if (prefix != null && !prefix.isEmpty()) {
                     mappedScopes.add(prefix + "/" + scope.trim());
                 } else {
                     mappedScopes.add(scope.trim());
@@ -411,34 +328,5 @@ public class CognitoScopeDiscoveryProcessor implements MessageProcessor {
             }
         }
         return String.join(" ", mappedScopes); // Formato esperado pelo Cognito
-    }
-
-    /**
-     * Classe interna para cache de scopes
-     */
-    private static class CacheEntry {
-        private final Map<String, String> scopePrefixes;
-        private final long timestamp;
-        
-        public CacheEntry(Map<String, String> scopePrefixes) {
-            this.scopePrefixes = scopePrefixes;
-            this.timestamp = System.currentTimeMillis();
-        }
-        
-        public Map<String, String> getScopePrefixes() {
-            return scopePrefixes;
-        }
-        
-        public long getTimestamp() {
-            return timestamp;
-        }
-        
-        public boolean isExpired() {
-            return System.currentTimeMillis() - timestamp > CACHE_EXPIRATION_MS;
-        }
-        
-        public java.time.Instant getLastUpdated() {
-            return java.time.Instant.ofEpochMilli(timestamp);
-        }
     }
 }
