@@ -1,0 +1,20 @@
+# Excluir arquivos grandes e desnecessários
+APIGateway_7.7.20240830_Install_linux-x86-64_BN04.run
+license.txt
+
+# Excluir arquivos de build
+build/
+.gradle/
+*.jar
+
+# Excluir arquivos de IDE
+.vscode/
+.idea/
+*.iml
+
+# Excluir arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# Excluir logs
+*.log 

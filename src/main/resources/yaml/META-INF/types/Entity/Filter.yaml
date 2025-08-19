@@ -1,0 +1,12 @@
+type: Filter
+name: Filter
+description: Base type for all filters
+fields:
+  - name: name
+    type: string
+    required: true
+    description: Name of the filter
+  - name: description
+    type: string
+    required: false
+    description: Description of the filter

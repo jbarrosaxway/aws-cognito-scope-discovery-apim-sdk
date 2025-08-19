@@ -1,0 +1,230 @@
+# 🔍 Exemplo de Uso com Scopes de Entrada
+# Este exemplo mostra como o filtro processa scopes de entrada e retorna mapeamentos completos
+
+# Exemplo 1: Scopes simples
+simple_scopes_example:
+  filter:
+    name: "Process Simple Scopes"
+    type: "CognitoScopeDiscoveryFilter"
+    properties:
+      userPoolId: "us-east-1_ABCD1234"
+      clientId: "client-a-123"
+      scopesInput: "read,write"  # Scopes simples para processar
+      awsRegion: "us-east-1"
+      credentialType: "iam"
+  
+  expected_output:
+    cognito.scopes.input_processed: "read, write"
+    cognito.scopes.input_mapped: "my-api/read my-api/write"
+    cognito.scopes.available: "my-api/read my-api/write my-api/admin"
+    cognito.scopes.mapped: "read -> my-api; write -> my-api; admin -> my-api"
+
+# Exemplo 2: Scopes com URL encoding
+url_encoded_example:
+  filter:
+    name: "Process URL Encoded Scopes"
+    type: "CognitoScopeDiscoveryFilter"
+    properties:
+      userPoolId: "us-east-1_ABCD1234"
+      clientId: "client-a-123"
+      scopesInput: "read%2Cwrite%2Cadmin"  # URL encoded: "read,write,admin"
+      awsRegion: "us-east-1"
+      credentialType: "iam"
+  
+  expected_output:
+    cognito.scopes.input_processed: "read, write, admin"
+    cognito.scopes.input_mapped: "my-api/read my-api/write my-api/admin"
+
+# Exemplo 3: Scopes com espaços extras
+spaces_example:
+  filter:
+    name: "Process Scopes with Extra Spaces"
+    type: "CognitoScopeDiscoveryFilter"
+    properties:
+      userPoolId: "us-east-1_ABCD1234"
+      clientId: "client-a-123"
+      scopesInput: "  read  ,  write  ,  admin  "  # Espaços extras
+      awsRegion: "us-east-1"
+      credentialType: "iam"
+  
+  expected_output:
+    cognito.scopes.input_processed: "read, write, admin"
+    cognito.scopes.input_mapped: "my-api/read my-api/write my-api/admin"
+
+# Exemplo 4: Scopes vazios
+empty_scopes_example:
+  filter:
+    name: "Process Empty Scopes"
+    type: "CognitoScopeDiscoveryFilter"
+    properties:
+      userPoolId: "us-east-1_ABCD1234"
+      clientId: "client-a-123"
+      scopesInput: ""  # Sem scopes de entrada
+      awsRegion: "us-east-1"
+      credentialType: "iam"
+  
+  expected_output:
+    cognito.scopes.input_processed: ""
+    cognito.scopes.input_mapped: ""
+
+# Exemplo 5: Scopes não encontrados
+unknown_scopes_example:
+  filter:
+    name: "Process Unknown Scopes"
+    type: "CognitoScopeDiscoveryFilter"
+    properties:
+      userPoolId: "us-east-1_ABCD1234"
+      clientId: "client-a-123"
+      scopesInput: "read,write,unknown_scope"  # Scope desconhecido
+      awsRegion: "us-east-1"
+      credentialType: "iam"
+  
+  expected_output:
+    cognito.scopes.input_processed: "read, write, unknown_scope"
+    cognito.scopes.input_mapped: "my-api/read my-api/write unknown_scope"  # Scope desconhecido mantido
+
+# Exemplo 6: Política completa com processamento de scopes
+complete_policy_example:
+  policy:
+    name: "Cognito Scope Processing Policy"
+    description: "Política completa para processar scopes de entrada"
+    
+    filters:
+      - name: "Process Input Scopes"
+        type: "CognitoScopeDiscoveryFilter"
+        properties:
+          userPoolId: "us-east-1_ABCD1234"
+          clientId: "client-a-123"
+          scopesInput: "read,write,admin"
+          awsRegion: "us-east-1"
+          credentialType: "iam"
+      
+      - name: "Log Processing Results"
+        type: "LogFilter"
+        properties:
+          logLevel: "INFO"
+          logMessage: |
+            Scopes processados:
+            - Entrada: ${cognito.scopes.input_processed}
+            - Mapeados: ${cognito.scopes.input_mapped}
+            - Disponíveis: ${cognito.scopes.available}
+      
+      - name: "Set Response with Processed Scopes"
+        type: "SetAttributeFilter"
+        properties:
+          attributeName: "response.body"
+          attributeValue: |
+            {
+              "input_scopes": {
+                "original": "read write admin",
+                "processed": "${cognito.scopes.input_processed}",
+                "mapped": "${cognito.scopes.input_mapped}"
+              },
+              "available_scopes": {
+                "list": "${cognito.scopes.available}",
+                "count": ${cognito.scopes.count},
+                "mappings": "${cognito.scopes.mapped}"
+              },
+              "cache_info": {
+                "hit": ${cognito.scopes.cache_hit},
+                "last_updated": "${cognito.scopes.last_updated}"
+              }
+            }
+
+# Exemplo 7: Uso em sequência OAuth
+oauth_sequence_example:
+  sequence:
+    name: "OAuth with Scope Processing"
+    description: "Fluxo OAuth com processamento automático de scopes"
+    
+    steps:
+      - name: "Process Input Scopes"
+        filter: "CognitoScopeDiscoveryFilter"
+        properties:
+          userPoolId: "us-east-1_ABCD1234"
+          clientId: "client-a-123"
+          scopesInput: "read,write"  # Scopes do cliente
+          awsRegion: "us-east-1"
+          credentialType: "iam"
+      
+      - name: "Generate OAuth Token with Mapped Scopes"
+        filter: "CognitoOAuthTokenFilter"
+        properties:
+          userPoolId: "us-east-1_ABCD1234"
+          clientId: "client-a-123"
+          clientSecret: "your-secret-here"
+          scope: "${cognito.scopes.input_mapped}"  # Usar scopes mapeados
+          grantType: "client_credentials"
+          cognitoDomain: "auth.us-east-1.amazoncognito.com"
+      
+      - name: "Return Complete Response"
+        filter: "SetAttributeFilter"
+        properties:
+          attributeName: "response.body"
+          attributeValue: |
+            {
+              "oauth_token": {
+                "access_token": "${cognito.oauth.token}",
+                "token_type": "${cognito.oauth.token.type}",
+                "expires_in": ${cognito.oauth.expires_in}
+              },
+              "scope_processing": {
+                "input": "${cognito.scopes.input_processed}",
+                "mapped": "${cognito.scopes.input_mapped}",
+                "used_in_token": "${cognito.scopes.input_mapped}"
+              },
+              "discovery_info": {
+                "available_scopes": "${cognito.scopes.available}",
+                "total_count": ${cognito.scopes.count},
+                "cache_hit": ${cognito.scopes.cache_hit}
+              }
+            }
+
+# Casos de uso comuns
+use_cases:
+  oauth_client:
+    description: "Cliente OAuth que envia scopes simples"
+    input: "read write admin"
+    expected_output: "my-api/read my-api/write my-api/admin"
+    
+  api_gateway:
+    description: "API Gateway que recebe scopes do cliente"
+    input: "user:read user:write"
+    expected_output: "user-api/user:read user-api/user:write"
+    
+  microservice:
+    description: "Microserviço que valida permissões"
+    input: "orders:create orders:read"
+    expected_output: "orders-service/orders:create orders-service/orders:read"
+    
+  mobile_app:
+    description: "App mobile com permissões específicas"
+    input: "profile:read notifications:write"
+    expected_output: "mobile-api/profile:read mobile-api/notifications:write"
+
+# Formato de entrada aceito
+input_format:
+  description: "O filtro aceita scopes em formato URL encoded e separados por espaços"
+  examples:
+    - "read write admin"           # Formato simples
+    - "read%20write%20admin"       # URL encoded
+    - "  read   write  admin  "    # Com espaços extras
+    - "read,write,admin"           # Separados por vírgula (será tratado como um scope)
+    - ""                           # Vazio (opcional)
+
+# Processamento automático
+automatic_processing:
+  description: "O filtro processa automaticamente os scopes de entrada"
+  steps:
+    1: "Recebe scopes de entrada (opcional)"
+    2: "Descobre scopes disponíveis no Cognito"
+    3: "Mapeia scopes simples para completos"
+    4: "Processa scopes de entrada usando os mapeamentos"
+    5: "Retorna scopes processados e mapeados"
+  
+  benefits:
+    - "Não precisa de mapeamentos fixos"
+    - "Processa qualquer lista de scopes"
+    - "Mapeia automaticamente para o formato correto"
+    - "Suporta múltiplos clientes com diferentes configurações"
+    - "Cache inteligente para performance"

@@ -1,0 +1,87 @@
+<ui>
+	<panel columns="2">
+		<NameAttribute />
+
+		<group label="AWS_COGNITO_SETTINGS_LABEL" span="2" columns="2" margin="0,0,0,7" fill="false">
+			<!-- Credenciais -->
+			<RadioGroupAttribute field="credentialType" label="AWS_COGNITO_CREDENTIAL_TYPE_LABEL"
+				displayName="AWS_COGNITO_CREDENTIAL_TYPE_NAME" description="AWS_COGNITO_CREDENTIAL_TYPE_DESCRIPTION"
+				removeEnvWhenFieldDisabled="true">
+				<choice value="local" label="AWS_COGNITO_CREDENTIAL_TYPE_LOCAL_LABEL" />
+				<panel margin="0,0,0,7" columns="2" span="2">
+					<ReferenceSelector field="awsCredential" 
+						selectableTypes="ApiKeyProfile" label="CHOOSE_AWS_CREDENTTIAL_LABEL"
+						title="CHOOSE_AWS_CREDENTTIAL_DIALOG_TITLE" searches="AuthProfilesGroup,ApiKeyGroup,ApiKeyProviderProfile" />
+				</panel>
+				<choice value="file" label="AWS_COGNITO_CREDENTIAL_TYPE_FILE_LABEL" />
+				<panel margin="0,0,0,7" columns="2" span="2">
+					<TextAttribute field="credentialsFilePath" label="AWS_COGNITO_CREDENTIALS_FILE_PATH_LABEL"
+						displayName="AWS_COGNITO_CREDENTIALS_FILE_PATH_NAME" description="AWS_COGNITO_CREDENTIALS_FILE_PATH_DESCRIPTION" />
+				</panel>
+				<choice value="iam" label="AWS_COGNITO_CREDENTIAL_TYPE_IAM_LABEL" />
+			</RadioGroupAttribute>
+
+			<ComboAttribute field="awsRegion" label="AWS_COGNITO_REGION_LABEL"
+				displayName="AWS_COGNITO_REGION_NAME" description="AWS_COGNITO_REGION_DESCRIPTION" 
+				contentSource="com.vordel.circuit.aws.RegionUtils.regions"
+				required="true" stretch="true" />
+
+			<ReferenceSelector field="clientConfiguration" required="true"
+				selectableTypes="AWSClientConfiguration" label="AWS_CLIENT_CONFIGURATION"
+				title="AWS_CLIENT_CONFIGURATION_DIALOG_TITLE" searches="AWSSettings" />
+		</group>
+
+		<tabFolder span="2">
+			<tab label="AWS_COGNITO_TAB_SETTINGS_LABEL">
+				<panel columns="2">
+					<TextAttribute field="userPoolId" label="AWS_COGNITO_USER_POOL_ID_LABEL"
+						displayName="AWS_COGNITO_USER_POOL_ID_NAME" description="AWS_COGNITO_USER_POOL_ID_DESCRIPTION" 
+						required="true" />
+
+					<TextAttribute field="clientId" label="AWS_COGNITO_CLIENT_ID_LABEL"
+						displayName="AWS_COGNITO_CLIENT_ID_NAME" description="AWS_COGNITO_CLIENT_ID_DESCRIPTION" 
+						required="true" />
+
+					<TextAttribute field="scopesInput" label="AWS_COGNITO_SCOPES_INPUT_LABEL"
+						displayName="AWS_COGNITO_SCOPES_INPUT_NAME" description="AWS_COGNITO_SCOPES_INPUT_DESCRIPTION" 
+						required="false" />
+				</panel>
+			</tab>
+			<tab label="AWS_COGNITO_TAB_OUTPUT_LABEL">
+				<panel columns="2">
+					<TextAttribute field="outputScopesAvailable" label="AWS_COGNITO_OUTPUT_SCOPES_AVAILABLE_LABEL"
+						displayName="AWS_COGNITO_OUTPUT_SCOPES_AVAILABLE_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_AVAILABLE_DESCRIPTION" 
+						readonly="true" />
+
+					<TextAttribute field="outputScopesMapped" label="AWS_COGNITO_OUTPUT_SCOPES_MAPPED_LABEL"
+						displayName="AWS_COGNITO_OUTPUT_SCOPES_MAPPED_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_MAPPED_DESCRIPTION" 
+						readonly="true" />
+
+					<TextAttribute field="outputScopesPrefixes" label="AWS_COGNITO_OUTPUT_SCOPES_PREFIXES_LABEL"
+						displayName="AWS_COGNITO_OUTPUT_SCOPES_PREFIXES_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_PREFIXES_DESCRIPTION" 
+						readonly="true" />
+
+					<TextAttribute field="outputScopesCount" label="AWS_COGNITO_OUTPUT_SCOPES_COUNT_LABEL"
+						displayName="AWS_COGNITO_OUTPUT_SCOPES_COUNT_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_COUNT_DESCRIPTION" 
+						readonly="true" />
+
+					<TextAttribute field="outputScopesInputProcessed" label="AWS_COGNITO_OUTPUT_SCOPES_INPUT_PROCESSED_LABEL"
+						displayName="AWS_COGNITO_OUTPUT_SCOPES_INPUT_PROCESSED_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_INPUT_PROCESSED_DESCRIPTION" 
+						readonly="true" />
+
+					<TextAttribute field="outputScopesInputMapped" label="AWS_COGNITO_OUTPUT_SCOPES_INPUT_MAPPED_LABEL"
+						displayName="AWS_COGNITO_OUTPUT_SCOPES_INPUT_MAPPED_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_INPUT_MAPPED_DESCRIPTION" 
+						readonly="true" />
+
+					<TextAttribute field="outputCacheHit" label="AWS_COGNITO_OUTPUT_CACHE_HIT_LABEL"
+						displayName="AWS_COGNITO_OUTPUT_CACHE_HIT_NAME" description="AWS_COGNITO_OUTPUT_CACHE_HIT_DESCRIPTION" 
+						readonly="true" />
+
+					<TextAttribute field="outputLastUpdated" label="AWS_COGNITO_OUTPUT_LAST_UPDATED_LABEL"
+						displayName="AWS_COGNITO_OUTPUT_LAST_UPDATED_NAME" description="AWS_COGNITO_OUTPUT_LAST_UPDATED_DESCRIPTION" 
+						readonly="true" />
+				</panel>
+			</tab>
+		</tabFolder>
+	</panel>
+</ui>

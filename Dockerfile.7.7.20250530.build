@@ -1,0 +1,55 @@
+# Dockerfile for BUILD - uses existing Axway image
+FROM docker.repository.axway.com/apigateway-docker-prod/7.7/gateway:7.7.0.20250530-1-BN0241-ubi9
+
+# Set environment variables
+ENV AXWAY_HOME=/opt/Axway
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-11.0.25.0.9-7.el9.x86_64
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+# Install required dependencies for build
+USER root
+RUN dnf update -y && \
+    dnf install -y \
+    wget \
+    unzip \
+    tar \
+    gzip \
+    java-11-openjdk \
+    java-11-openjdk-devel \
+    git \
+    && dnf clean all
+
+# Set Java 11 as default
+RUN alternatives --set java java-11-openjdk.x86_64 && \
+    alternatives --set javac java-11-openjdk.x86_64
+
+# Install Gradle
+RUN curl -O https://downloads.gradle.org/distributions/gradle-7.6-bin.zip && \
+    unzip gradle-7.6-bin.zip -d /opt && \
+    ln -s /opt/gradle-7.6/bin/gradle /usr/local/bin/gradle && \
+    rm gradle-7.6-bin.zip
+
+# Copy Axway installer
+COPY APIGateway_7.7.20250530_Install_linux-x86-64_BN01.run /tmp/
+
+# Install Axway Gateway with Policy Studio
+RUN /tmp/APIGateway_7.7.20250530_Install_linux-x86-64_BN01.run \
+    --enable-components policystudio,configurationstudio \
+    --disable-components nodemanager,cassandra,apigateway,qstart,agentsConfiguration,apimgmt,analytics,packagedeploytools \
+    --setup_type advanced \
+    --unattendedmodeui none \
+    --prefix '/opt/Axway' \
+    --debuglevel 4 \
+    --mode unattended \
+    --acceptGeneralConditions yes
+
+# Create working directory
+WORKDIR /workspace
+
+# Copy source code
+COPY . .
+
+RUN rm /tmp/APIGateway_7.7.20250530_Install_linux-x86-64_BN01.run
+
+# Build command
+CMD ["gradle", "buildJarLinux"] 

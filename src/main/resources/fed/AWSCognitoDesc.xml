@@ -1,0 +1,43 @@
+<!-- This type defines the filter configuration data for the Cognito Scope Discovery filter
+which discovers AWS Cognito scopes dynamically from Policy Studio "class" - The
+filter classname. "userPoolId" - The ID of the Cognito User Pool "clientId" - 
+The ID of the Cognito app client "awsRegion" - The AWS region where the Cognito 
+service is located "credentialType" - The type of AWS credentials to use
+"awsCredential" - Reference to AWS credentials profile "clientConfiguration" - 
+Reference to AWS client configuration "credentialsFilePath" - Path to AWS 
+credentials file "scopesInput" - Input scopes to process (comma-separated) -->
+
+<entityStoreData>
+	<entityType name="CognitoScopeDiscoveryFilter" extends="AWSFilter">
+		<constant name="class" type="string" value="com.axway.aws.cognito.CognitoScopeDiscoveryFilter" />
+		<field name="userPoolId" type="string" cardinality="1" />
+		<field name="clientId" type="string" cardinality="1" />
+		<field name="awsRegion" type="string" cardinality="1" />
+		<field name="credentialType" type="string" cardinality="1" />
+		<field name="awsCredential" type="^ApiKeyProfile" cardinality="1" />
+		<field name="clientConfiguration" type="^AWSClientConfiguration" cardinality="1" />
+		<field name="credentialsFilePath" type="string" cardinality="1" />
+		<field name="scopesInput" type="string" cardinality="1" />
+	</entityType>
+
+	<!-- Internationalization for logging / audit trail -->
+	<entity xmlns="http://www.vordel.com/2005/06/24/entityStore"
+		type="InternationalizationFilter">
+		<key type="Internationalization">
+			<id field="name" value="Internationalization Default" />
+		</key>
+		<fval name="type">
+			        <value>CognitoScopeDiscoveryFilter</value>
+		</fval>
+		<fval name="logFatal">
+			        <value>Error in the Cognito Scope Discovery filter. Error: ${circuit.exception}</value>
+		</fval>
+		<fval name="logFailure">
+			        <value>Failed in the Cognito Scope Discovery filter</value>
+		</fval>
+		<fval name="logSuccess">
+			        <value>Success in the Cognito Scope Discovery filter</value>
+		</fval>
+	</entity>
+
+</entityStoreData>

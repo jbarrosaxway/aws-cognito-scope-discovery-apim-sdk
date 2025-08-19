@@ -1,0 +1,60 @@
+type: AWSClientConfiguration
+name: AWS Client Configuration
+description: Configuration for AWS client connections
+fields:
+  - name: connectionTimeout
+    type: integer
+    required: false
+    description: Connection timeout in milliseconds
+  - name: socketTimeout
+    type: integer
+    required: false
+    description: Socket timeout in milliseconds
+  - name: maxErrorRetry
+    type: integer
+    required: false
+    description: Maximum number of retry attempts
+  - name: maxConnections
+    type: integer
+    required: false
+    description: Maximum number of simultaneous connections
+  - name: protocol
+    type: string
+    required: false
+    description: Protocol to use (HTTP, HTTPS)
+  - name: userAgent
+    type: string
+    required: false
+    description: User agent string
+  - name: proxyHost
+    type: string
+    required: false
+    description: Proxy host
+  - name: proxyPort
+    type: integer
+    required: false
+    description: Proxy port
+  - name: proxyUsername
+    type: string
+    required: false
+    description: Proxy username
+  - name: proxyPassword
+    type: encrypted
+    required: false
+    description: Proxy password (encrypted)
+  - name: proxyDomain
+    type: string
+    required: false
+    description: Proxy domain
+  - name: proxyWorkstation
+    type: string
+    required: false
+    description: Proxy workstation
+  - name: socketSendBufferSizeHint
+    type: integer
+    required: false
+    description: Socket send buffer size hint
+  - name: socketReceiveBufferSizeHint
+    type: integer
+    required: false
+    description: Socket receive buffer size hint

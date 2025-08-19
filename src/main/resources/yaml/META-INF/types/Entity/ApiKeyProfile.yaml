@@ -1,0 +1,16 @@
+type: ApiKeyProfile
+name: API Key Profile
+description: Profile containing API key credentials
+fields:
+  - name: name
+    type: string
+    required: true
+    description: Name of the profile
+  - name: apiKey
+    type: string
+    required: true
+    description: API key value
+  - name: secretKey
+    type: encrypted
+    required: true
+    description: Secret key value (encrypted)

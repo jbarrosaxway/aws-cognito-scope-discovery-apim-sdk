@@ -1,0 +1,169 @@
+# Exemplo de uso do filtro AWS Cognito Scope Discovery
+# Este filtro descobre automaticamente quais scopes estão disponíveis para um clientId
+
+filter:
+  name: "AWS Cognito Scope Discovery"
+  type: "CognitoScopeDiscoveryFilter"
+  properties:
+    # Configurações obrigatórias
+    userPoolId: "us-east-1_ABCD1234"  # ID do User Pool do Cognito
+    clientId: "client-a-123"          # ID do app client para consultar scopes
+    
+    # Scopes de entrada (opcional)
+    scopesInput: "read,write,admin"   # Lista de scopes para processar
+    
+    # Configurações AWS
+    awsRegion: "us-east-1"            # Região AWS
+    credentialType: "iam"             # Tipo de credenciais (iam, file, local)
+    
+    # Configurações avançadas (opcionais)
+    connectionTimeout: "30000"        # Timeout de conexão em ms
+    socketTimeout: "30000"            # Timeout de socket em ms
+    maxErrorRetry: "3"                # Máximo de tentativas
+    maxConnections: "50"              # Máximo de conexões simultâneas
+
+# Exemplo de política completa
+policy:
+  name: "Cognito Scope Discovery Policy"
+  description: "Política para descobrir scopes disponíveis no Cognito"
+  
+  filters:
+    - name: "Discover Cognito Scopes"
+      type: "CognitoScopeDiscoveryFilter"
+      properties:
+        userPoolId: "us-east-1_ABCD1234"
+        clientId: "client-a-123"
+        awsRegion: "us-east-1"
+        credentialType: "iam"
+    
+    - name: "Log Results"
+      type: "LogFilter"
+      properties:
+        logLevel: "INFO"
+        logMessage: "Scopes descobertos: ${cognito.scopes.available}"
+    
+    - name: "Set Response"
+      type: "SetAttributeFilter"
+      properties:
+        attributeName: "response.body"
+        attributeValue: |
+          {
+            "scopes": {
+              "available": "${cognito.scopes.available}",
+              "mapped": "${cognito.scopes.mapped}",
+              "prefixes": "${cognito.scopes.prefixes}",
+              "count": ${cognito.scopes.count},
+              "input_processed": "${cognito.scopes.input_processed}",
+              "input_mapped": "${cognito.scopes.input_mapped}",
+              "cache_hit": ${cognito.scopes.cache_hit},
+              "last_updated": "${cognito.scopes.last_updated}"
+            }
+          }
+
+# Exemplo de uso em sequência com outros filtros
+sequence:
+  name: "Cognito OAuth Flow"
+  description: "Fluxo completo: descobrir scopes e gerar token"
+  
+  steps:
+    - name: "Discover Scopes"
+      filter: "CognitoScopeDiscoveryFilter"
+      properties:
+        userPoolId: "us-east-1_ABCD1234"
+        clientId: "client-a-123"
+        scopesInput: "read,write"  # Scopes de entrada (vírgulas)
+        awsRegion: "us-east-1"
+        credentialType: "iam"
+    
+    - name: "Generate OAuth Token"
+      filter: "CognitoOAuthTokenFilter"
+      properties:
+        userPoolId: "us-east-1_ABCD1234"
+        clientId: "client-a-123"
+        clientSecret: "your-secret-here"
+        scope: "${cognito.scopes.input_mapped}"  # Usar scopes mapeados (espaços, formato Cognito)
+        grantType: "client_credentials"
+        cognitoDomain: "auth.us-east-1.amazoncognito.com"
+    
+    - name: "Return Token"
+      filter: "SetAttributeFilter"
+      properties:
+        attributeName: "response.body"
+        attributeValue: |
+          {
+            "access_token": "${cognito.oauth.token}",
+            "token_type": "${cognito.oauth.token.type}",
+            "expires_in": ${cognito.oauth.expires_in},
+            "scopes_used": "${cognito.scopes.mapped}"
+          }
+
+# Configurações de diferentes ambientes
+environments:
+  development:
+    userPoolId: "us-east-1_DEV123"
+    clientId: "dev-client-456"
+    awsRegion: "us-east-1"
+    credentialType: "iam"
+  
+  staging:
+    userPoolId: "us-east-1_STG789"
+    clientId: "stg-client-012"
+    awsRegion: "us-east-1"
+    credentialType: "iam"
+  
+  production:
+    userPoolId: "us-east-1_PROD456"
+    clientId: "prod-client-789"
+    awsRegion: "us-east-1"
+    credentialType: "iam"
+
+# Exemplo de configuração com credenciais de arquivo
+file_credentials_example:
+  filter:
+    name: "AWS Cognito Scope Discovery (File Credentials)"
+    type: "CognitoScopeDiscoveryFilter"
+    properties:
+      userPoolId: "us-east-1_ABCD1234"
+      clientId: "client-a-123"
+      awsRegion: "us-east-1"
+      credentialType: "file"
+      credentialsFilePath: "/path/to/aws/credentials"
+
+# Exemplo de configuração com credenciais locais
+local_credentials_example:
+  filter:
+    name: "AWS Cognito Scope Discovery (Local Credentials)"
+    type: "CognitoScopeDiscoveryFilter"
+    properties:
+      userPoolId: "us-east-1_ABCD1234"
+      clientId: "client-a-123"
+      awsRegion: "us-east-1"
+      credentialType: "local"
+      awsCredential: "my-aws-credential-profile"  # Referência ao perfil de credenciais
+
+# Propriedades de saída disponíveis
+output_properties:
+  cognito.scopes.available: "Lista de todos os scopes disponíveis (ex: my-api/read my-api/write)"
+  cognito.scopes.mapped: "Mapeamento de scopes simples para completos (ex: read -> my-api/read; write -> my-api/write)"
+  cognito.scopes.prefixes: "Lista de prefixos descobertos (ex: my-api default-m2m-resource-server-sjv0xi)"
+  cognito.scopes.count: "Número total de scopes disponíveis"
+  cognito.scopes.input_processed: "Scopes de entrada processados e limpos (ex: read write admin)"
+  cognito.scopes.input_mapped: "Scopes de entrada mapeados com prefixos (ex: my-api/read my-api/write my-api/admin)"
+  cognito.scopes.cache_hit: "Indica se o resultado veio do cache (true/false)"
+  cognito.scopes.last_updated: "Timestamp da última descoberta de scopes"
+  cognito.scopes.error: "Código de erro em caso de falha"
+  cognito.scopes.error_description: "Descrição detalhada do erro"
+
+# Logs esperados
+expected_logs:
+  - "Iniciando descoberta de scopes do AWS Cognito"
+  - "Consultando scopes para userPoolId: us-east-1_ABCD1234, clientId: client-a-123"
+  - "Descobrindo scopes para clientId: client-a-123 no User Pool: us-east-1_ABCD1234"
+  - "Scopes OAuth permitidos: [my-api/read, my-api/write, my-api/admin]"
+  - "Mapeamento descoberto: 'read' -> 'my-api'"
+  - "Mapeamento descoberto: 'write' -> 'my-api'"
+  - "Mapeamento descoberto: 'admin' -> 'my-api'"
+  - "Total de scopes disponíveis: 3"
+  - "Total de mapeamentos: 3"
+  - "Cache atualizado para: us-east-1_ABCD1234:client-a-123 com 3 mapeamentos"
+  - "Descoberta de scopes concluída com sucesso"

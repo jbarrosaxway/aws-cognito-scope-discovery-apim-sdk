@@ -1,0 +1,84 @@
+# Exemplo de values.yaml para configurar IAM Role no ServiceAccount
+# Para usar com o template Helm do Axway Gateway
+
+apitraffic:
+  serviceAccount:
+    # Habilitar criação do ServiceAccount
+    create: true
+    
+    # Annotations para configurar IAM Role (IRSA)
+    annotations:
+      # IAM Role ARN para autenticação AWS
+      eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/axway-lambda-role"
+      
+      # OIDC Provider (opcional, para clusters EKS)
+      eks.amazonaws.com/audience: "sts.amazonaws.com"
+      
+      # Tags para organização (opcional)
+      eks.amazonaws.com/token-expiration: "3600"
+      
+      # Annotations customizadas para o projeto
+      axway.com/project: "lambda-sdk"
+      axway.com/environment: "presales-latam"
+      axway.com/owner: "joaojbarros@axway.com"
+
+# Exemplo completo com outras configurações
+global:
+  environment: "presales-latam"
+  
+# Configurações do Gateway
+gateway:
+  replicaCount: 2
+  
+# Configurações de recursos
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+# Configurações de ingress (se necessário)
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  hosts:
+    - host: axway-gateway.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+# Configurações de persistência
+persistence:
+  enabled: true
+  storageClass: "gp2"
+  size: 10Gi
+
+# Configurações de segurança
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Configurações de monitoramento
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+
+# Configurações de logs
+logging:
+  level: INFO
+  format: json
+
+# Configurações de autenticação
+auth:
+  # Configurações AWS
+  aws:
+    region: "us-east-1"
+    # As credenciais serão obtidas via IAM Role
+    # configurado no ServiceAccount 

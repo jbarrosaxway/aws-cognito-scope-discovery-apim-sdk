@@ -1,0 +1,107 @@
+# IDE and Editor files
+/.idea/
+/.settings/
+/.vscode/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# Gradle
+/.gradle/
+/gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# Build outputs
+/build/
+/out/
+/target/
+*.jar
+*.war
+*.ear
+*.class
+
+# Logs
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# AWS CLI and credentials
+/aws/
+.aws/
+aws-credentials.txt
+aws-config.txt
+*.pem
+*.key
+*.crt
+
+# Environment variables and secrets
+.env
+.env.local
+.env.production
+.env.staging
+*.env
+secrets.txt
+credentials.txt
+
+# License files (temporary for build)
+license.txt
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Node.js (if any)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python (if any)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.backup.*
+
+# Installer files
+*.run
+
+# Axway API Gateway installers
+APIGateway_*.run
+
+# Test files
+test-results/
+coverage/
+.coverage
+
+# Documentation temporary files
+*.docx
+*.doc
+*.pdf

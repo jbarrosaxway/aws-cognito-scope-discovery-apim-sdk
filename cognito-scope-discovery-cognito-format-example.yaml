@@ -1,0 +1,185 @@
+# 🔍 Exemplo: Formato Correto para Cognito
+# Este exemplo mostra como o filtro converte scopes de entrada para o formato que o Cognito espera
+
+# 📋 FORMATOS:
+# - ENTRADA: Vírgulas (como você está usando atualmente)
+# - SAÍDA: Espaços (formato que o Cognito espera na chamada de token)
+
+# Exemplo 1: Fluxo básico
+basic_flow:
+  description: "Converter scopes de entrada para formato Cognito"
+  
+  input:
+    scopesInput: "read,write,admin"  # Formato de entrada (vírgulas)
+  
+  output:
+    cognito.scopes.input_processed: "read, write, admin"  # Processado (vírgulas)
+    cognito.scopes.input_mapped: "my-api/read my-api/write my-api/admin"  # Mapeado (espaços)
+  
+  usage_in_cognito:
+    scope: "${cognito.scopes.input_mapped}"  # Usar diretamente na chamada do Cognito
+
+# Exemplo 2: Política completa com formato correto
+complete_policy:
+  policy:
+    name: "Cognito Scope Discovery with Correct Format"
+    description: "Política que converte scopes para formato Cognito"
+    
+    filters:
+      - name: "Discover and Map Scopes"
+        type: "CognitoScopeDiscoveryFilter"
+        properties:
+          userPoolId: "us-east-1_ABCD1234"
+          clientId: "client-a-123"
+          scopesInput: "read,write,admin"  # Entrada: vírgulas
+          awsRegion: "us-east-1"
+          credentialType: "iam"
+      
+      - name: "Log Format Conversion"
+        type: "LogFilter"
+        properties:
+          logLevel: "INFO"
+          logMessage: |
+            Conversão de formato:
+            - Entrada (vírgulas): ${cognito.scopes.input_processed}
+            - Saída (espaços): ${cognito.scopes.input_mapped}
+            - Pronto para Cognito: ✅
+      
+      - name: "Generate OAuth Token"
+        type: "CognitoOAuthTokenFilter"
+        properties:
+          userPoolId: "us-east-1_ABCD1234"
+          clientId: "client-a-123"
+          clientSecret: "your-secret-here"
+          scope: "${cognito.scopes.input_mapped}"  # Formato correto para Cognito
+          grantType: "client_credentials"
+          cognitoDomain: "auth.us-east-1.amazoncognito.com"
+      
+      - name: "Return Complete Response"
+        type: "SetAttributeFilter"
+        properties:
+          attributeName: "response.body"
+          attributeValue: |
+            {
+              "oauth_token": {
+                "access_token": "${cognito.oauth.token}",
+                "token_type": "${cognito.oauth.token.type}",
+                "expires_in": ${cognito.oauth.expires_in}
+              },
+              "scope_conversion": {
+                "input_format": "comma-separated",
+                "input_scopes": "${cognito.scopes.input_processed}",
+                "cognito_format": "space-separated",
+                "cognito_scopes": "${cognito.scopes.input_mapped}",
+                "ready_for_cognito": true
+              },
+              "discovery_info": {
+                "available_scopes": "${cognito.scopes.available}",
+                "total_count": ${cognito.scopes.count},
+                "cache_hit": ${cognito.scopes.cache_hit}
+              }
+            }
+
+# Exemplo 3: Diferentes formatos de entrada
+input_formats:
+  comma_separated:
+    input: "read,write,admin"
+    expected_output: "my-api/read my-api/write my-api/admin"
+  
+  comma_with_spaces:
+    input: "read, write, admin"
+    expected_output: "my-api/read my-api/write my-api/admin"
+  
+  comma_extra_spaces:
+    input: "  read  ,  write  ,  admin  "
+    expected_output: "my-api/read my-api/write my-api/admin"
+  
+  url_encoded:
+    input: "read%2Cwrite%2Cadmin"  # "read,write,admin"
+    expected_output: "my-api/read my-api/write my-api/admin"
+  
+  single_scope:
+    input: "read"
+    expected_output: "my-api/read"
+  
+  empty_input:
+    input: ""
+    expected_output: ""
+
+# Exemplo 4: Casos de uso reais
+real_world_examples:
+  oauth_client:
+    description: "Cliente OAuth envia scopes separados por vírgula"
+    input: "user:read,user:write,profile:read"
+    cognito_output: "user-api/user:read user-api/user:write profile-api/profile:read"
+    usage: "scope=${cognito.scopes.input_mapped}"
+  
+  api_gateway:
+    description: "API Gateway recebe scopes do cliente"
+    input: "orders:create,orders:read,orders:update"
+    cognito_output: "orders-service/orders:create orders-service/orders:read orders-service/orders:update"
+    usage: "scope=${cognito.scopes.input_mapped}"
+  
+  mobile_app:
+    description: "App mobile com permissões específicas"
+    input: "notifications:read,notifications:write,location:read"
+    cognito_output: "mobile-api/notifications:read mobile-api/notifications:write mobile-api/location:read"
+    usage: "scope=${cognito.scopes.input_mapped}"
+
+# Exemplo 5: Validação de formato
+format_validation:
+  description: "O filtro valida e converte automaticamente"
+  
+  valid_inputs:
+    - "read,write"
+    - "read, write, admin"
+    - "  read  ,  write  ,  admin  "
+    - "read%2Cwrite%2Cadmin"
+    - "single_scope"
+    - ""
+  
+  invalid_inputs:
+    - "read write"  # Espaços sem vírgulas (será tratado como um scope único)
+    - "read;write"  # Ponto e vírgula (será tratado como um scope único)
+    - "read|write"  # Pipe (será tratado como um scope único)
+  
+  processing_rules:
+    1: "Divide por vírgulas (,)"
+    2: "Remove espaços extras"
+    3: "Mapeia para prefixos descobertos"
+    4: "Junta com espaços para formato Cognito"
+    5: "Retorna pronto para uso"
+
+# Exemplo 6: Teste de integração
+integration_test:
+  description: "Teste completo de integração"
+  
+  test_steps:
+    1: "Configurar filtro com scopesInput: 'read,write,admin'"
+    2: "Executar descoberta de scopes"
+    3: "Verificar cognito.scopes.input_processed = 'read, write, admin'"
+    4: "Verificar cognito.scopes.input_mapped = 'my-api/read my-api/write my-api/admin'"
+    5: "Usar cognito.scopes.input_mapped na chamada do Cognito"
+    6: "Validar que o token é gerado com sucesso"
+  
+  expected_logs:
+    - "Scopes de entrada processados: read, write, admin"
+    - "Scopes de entrada mapeados: my-api/read my-api/write my-api/admin"
+    - "Formato pronto para Cognito: ✅"
+  
+  success_criteria:
+    - "Entrada processada corretamente (vírgulas)"
+    - "Saída no formato Cognito (espaços)"
+    - "Token OAuth gerado com sucesso"
+    - "Cache funcionando corretamente"
+
+# 📚 REFERÊNCIAS:
+# - AWS Cognito OAuth 2.0: https://docs.aws.amazon.com/cognito/latest/developerguide/token-endpoint.html
+# - RFC 6749 (OAuth 2.0): https://tools.ietf.org/html/rfc6749#section-4.4.2
+# - Formato scope: space-separated list of scopes
+
+# ✅ RESUMO:
+# O filtro converte automaticamente:
+# - ENTRADA: "read,write,admin" (vírgulas)
+# - SAÍDA: "my-api/read my-api/write my-api/admin" (espaços)
+# - PRONTO para usar em: scope=${cognito.scopes.input_mapped}

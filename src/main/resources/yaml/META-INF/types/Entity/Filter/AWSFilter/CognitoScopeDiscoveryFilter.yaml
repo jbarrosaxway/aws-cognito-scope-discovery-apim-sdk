@@ -1,0 +1,61 @@
+type: CognitoScopeDiscoveryFilter
+name: Cognito Scope Discovery Filter
+description: Discovers AWS Cognito scopes dynamically and maps them to full scope format
+fields:
+  - name: userPoolId
+    type: string
+    required: true
+    description: ID of the Cognito User Pool
+  - name: clientId
+    type: string
+    required: true
+    description: ID of the Cognito app client
+  - name: awsRegion
+    type: string
+    required: true
+    description: AWS region where the Cognito service is located
+  - name: credentialType
+    type: string
+    required: true
+    description: Type of AWS credentials to use (local, file, iam)
+  - name: awsCredential
+    type: ApiKeyProfile
+    required: false
+    description: Reference to AWS credentials profile
+  - name: clientConfiguration
+    type: AWSClientConfiguration
+    required: true
+    description: Reference to AWS client configuration
+  - name: credentialsFilePath
+    type: string
+    required: false
+    description: Path to AWS credentials file
+  - name: scopesInput
+    type: string
+    required: false
+    description: Input scopes to process (comma-separated)
+outputs:
+  - name: cognito.scopes.available
+    type: string
+    description: List of all available scopes for the client
+  - name: cognito.scopes.mapped
+    type: string
+    description: Mapping of simple scopes to full scopes
+  - name: cognito.scopes.prefixes
+    type: string
+    description: List of scope prefixes discovered
+  - name: cognito.scopes.count
+    type: integer
+    description: Total number of available scopes
+  - name: cognito.scopes.input_processed
+    type: string
+    description: Input scopes after processing (cleaned and normalized)
+  - name: cognito.scopes.input_mapped
+    type: string
+    description: Input scopes mapped to full scopes with prefixes
+  - name: cognito.scopes.cache_hit
+    type: boolean
+    description: Whether the result came from cache
+  - name: cognito.scopes.last_updated
+    type: string
+    description: Timestamp of when scopes were last discovered

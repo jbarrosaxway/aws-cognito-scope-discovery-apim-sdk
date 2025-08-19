@@ -1,0 +1,527 @@
+plugins {
+    id 'java'
+}
+
+group 'com.axway'
+version '1.0.0'
+sourceCompatibility = 1.8
+
+task copyExternalDependencies(type: Copy) {
+    description = 'Copies external dependencies to dependencies folder'
+    
+    // Create destination folder
+    def dependenciesDir = file("dependencies")
+    dependenciesDir.mkdirs()
+    
+    // Set destination
+    into dependenciesDir
+    
+    // Strategy for handling duplicates
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    
+    // Copy only external dependencies (not from Axway)
+    from configurations.runtimeClasspath
+    
+    // Filter only AWS JARs not from Axway
+    include { fileTreeElement ->
+        def fileName = fileTreeElement.name
+        if (fileName.contains('aws-java-sdk') && !fileName.contains('axway')) {
+            println "✅ Copying external dependency: $fileName"
+            return true
+        }
+        return false
+    }
+    
+    // Rename to avoid conflicts
+    rename { fileName ->
+        "external-${fileName}"
+    }
+}
+
+task listDependencies {
+    description = 'Lists all project dependencies'
+    
+    doLast {
+        println "📋 Project dependencies:"
+        configurations.runtimeClasspath.each { file ->
+            println "  - ${file.name}"
+        }
+        
+        println "\n📋 AWS dependencies:"
+        configurations.runtimeClasspath.each { file ->
+            if (file.name.contains('aws')) {
+                println "  - ${file.name}"
+            }
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+// Dynamic configuration of Axway API Gateway
+// Improvement: Enhanced support for multiple Axway versions
+def axway_base = System.getProperty('axway.base', '/opt/axway/Axway-7.7.0.20240830')
+def apim_folder = "${axway_base}/apigateway/system"
+def ps_folder = "${axway_base}/policystudio"
+
+// Alternative configurations (uncomment if needed)
+//def axway_base_alt = '/opt/axway/Axway-7.7.0.20210830'
+//def apim_folder_alt = "${axway_base_alt}/apigateway/system"
+//def ps_folder_alt = "${axway_base_alt}/policystudio"
+
+dependencies {
+    // Dynamic dependency configuration based on Axway
+    def useAxwayAwsSdk = System.getProperty('use.axway.aws.sdk', 'true').toBoolean()
+    def fallbackAwsSdkVersion = System.getProperty('fallback.aws.sdk.version', '1.12.314')
+    
+    // Include all Axway core JARs for Disposable and other dependencies
+    def axwayCoreJars = fileTree(dir: "${apim_folder}/lib", include: '*.jar')
+    def axwayJceJars = fileTree(dir: "${apim_folder}/lib/jce", include: '*.jar')
+    implementation axwayCoreJars
+    implementation axwayJceJars
+    
+    if (useAxwayAwsSdk) {
+        // Use AWS SDK from Axway (recommended)
+        println "🔍 Using Axway AWS SDK: ${apim_folder}/lib"
+        
+        // Check if AWS SDK is available in Axway
+        def awsSdkJars = fileTree(dir: "${apim_folder}/lib", include: '*aws*.jar')
+        def awsSdkModulesJars = fileTree(dir: "${apim_folder}/lib/modules/aws", include: '*.jar')
+        
+        if (awsSdkJars.files.size() > 0 || awsSdkModulesJars.files.size() > 0) {
+            println "✅ AWS SDK found in Axway: ${awsSdkJars.files.size() + awsSdkModulesJars.files.size()} JARs"
+            implementation awsSdkJars
+            implementation awsSdkModulesJars
+            
+            // Detect AWS SDK version from Axway
+            def detectedVersion = null
+            awsSdkModulesJars.files.each { jar ->
+                def matcher = jar.name =~ /aws-java-sdk-.*-(\d+\.\d+\.\d+)\.jar/
+                if (matcher.find() && !detectedVersion) {
+                    detectedVersion = matcher.group(1)
+                    println "🔍 Detected AWS SDK version: $detectedVersion"
+                }
+            }
+            
+            // Check if AWS SDK Cognito is available
+            def awsCognitoJar = awsSdkModulesJars.files.find { it.name.contains('cognitoidp') }
+            if (!awsCognitoJar) {
+                def cognitoVersion = detectedVersion ?: fallbackAwsSdkVersion
+                println "⚠️  AWS SDK Cognito not found in Axway, adding external: $cognitoVersion"
+                implementation group: 'com.amazonaws', name: 'aws-java-sdk-cognitoidp', version: cognitoVersion
+            }
+            
+            // Check if AWS SDK STS is available (required for WebIdentityTokenCredentialsProvider)
+            def awsStsJar = awsSdkModulesJars.files.find { it.name.contains('sts') }
+            if (!awsStsJar) {
+                def stsVersion = detectedVersion ?: fallbackAwsSdkVersion
+                println "⚠️  AWS SDK STS not found in Axway, adding external: $stsVersion"
+                implementation group: 'com.amazonaws', name: 'aws-java-sdk-sts', version: stsVersion
+            }
+        } else {
+            println "⚠️  AWS SDK not found in Axway, using fallback: $fallbackAwsSdkVersion"
+            implementation group: 'com.amazonaws', name: 'aws-java-sdk-cognitoidp', version: fallbackAwsSdkVersion
+            implementation group: 'com.amazonaws', name: 'aws-java-sdk-core', version: fallbackAwsSdkVersion
+            implementation group: 'com.amazonaws', name: 'aws-java-sdk-sts', version: fallbackAwsSdkVersion
+        }
+    } else {
+        // Use external AWS SDK (fallback)
+        println "🔧 Using external AWS SDK: $fallbackAwsSdkVersion"
+        implementation group: 'com.amazonaws', name: 'aws-java-sdk-cognitoidp', version: fallbackAwsSdkVersion
+        implementation group: 'com.amazonaws', name: 'aws-java-sdk-core', version: fallbackAwsSdkVersion
+        implementation group: 'com.amazonaws', name: 'aws-java-sdk-sts', version: fallbackAwsSdkVersion
+    }
+    
+    // Axway API Gateway libs
+    implementation fileTree( dir: "${apim_folder}/lib", include: '*.jar')
+    implementation fileTree(dir: "${apim_folder}/lib/modules", include: '*.jar')
+    implementation fileTree(dir: "${apim_folder}/lib/plugins", include: '*.jar')
+    
+    // Policy Studio libs
+    implementation fileTree(dir: "${ps_folder}/plugins", include: '*.jar')
+    
+    // Automatically detect filterbase folder
+    def filterbaseDir = file("${ps_folder}/plugins").listFiles().find { 
+        it.isDirectory() && it.name.startsWith("com.vordel.rcp.filterbase") 
+    }
+    
+    if (filterbaseDir) {
+        println "✅ Filterbase folder detected: ${filterbaseDir.name}"
+        implementation files("${ps_folder}/plugins/${filterbaseDir.name}")
+    } else {
+        println "⚠️  Filterbase folder not found. Trying to use fileTree..."
+        implementation fileTree(dir: "${ps_folder}/plugins", include: 'com.vordel.rcp.filterbase*/**')
+    }
+}
+
+// Task para instalação no Linux
+task installLinux(type: Exec) {
+    group = 'Installation'
+    description = 'Installs the AWS Cognito filter on Linux'
+    
+    dependsOn build
+    
+    commandLine 'bash', 'scripts/linux/install-filter.sh'
+    
+    doFirst {
+        println "🚀 Installing AWS Cognito filter on Linux..."
+        println "📁 JAR: build/libs/aws-cognito-scope-discovery-apim-sdk-1.0.0.jar"
+        println "📁 Gateway: ${axway_base}"
+    }
+}
+
+// Task para instalação no Windows (apenas arquivos YAML)
+task installWindows {
+    group = 'Installation'
+    description = 'Installs only the YAML files on Windows (no JAR build)'
+    
+    doFirst {
+        println "📋 Note: The JAR must be built on Linux and copied manually"
+        println ""
+        println "📂 Policy Studio project examples:"
+        println "   C:\\Users\\jbarros\\apiprojects\\my-axway-project"
+        println "   C:\\Users\\jbarros\\apiprojects\\POC-CUSTOM-FILTER"
+        println "   C:\\Projects\\API-Gateway\\MyProject"
+        println ""
+        
+        // Request Policy Studio project path
+        def projectPath = System.console()?.readLine("📂 Enter the Policy Studio project path: ")
+        
+        if (!projectPath) {
+            throw new GradleException("❌ Project path not provided!")
+        }
+        
+        // Use helper function to install YAML files
+        installYamlFiles(projectPath, "installWindows")
+    }
+}
+
+// Helper function to process internationalization file
+def processInternationalizationFile(def sourceFile, def destFile) {
+    if (!sourceFile.exists()) {
+        println "❌ File not found: ${sourceFile.absolutePath}"
+        return false
+    }
+    
+    def sourceContent = sourceFile.text.trim()
+    def destContent = destFile.exists() ? destFile.text : ""
+    
+    // Check if CognitoScopeDiscoveryFilter already exists in the file
+    if (destContent.contains("type: CognitoScopeDiscoveryFilter")) {
+        println "🔄 CognitoScopeDiscoveryFilter already exists. Updating section..."
+        
+        // Strategy: preserve other filters and only update CognitoScopeDiscoveryFilter
+        def lines = destContent.split('\n')
+        def newLines = []
+        def skipSection = false
+        def inInternationalizationFilter = false
+        def foundCognitoScopeDiscoveryFilter = false
+        def outputNewContent = false
+        
+        for (int i = 0; i < lines.length; i++) {
+            def line = lines[i]
+            def trimmedLine = line.trim()
+            
+            // Detect start of InternationalizationFilter
+            if (trimmedLine == "type: InternationalizationFilter") {
+                inInternationalizationFilter = true
+                skipSection = false
+                newLines.add(line)
+                continue
+            }
+            
+            // If we are inside InternationalizationFilter, check if it contains CognitoScopeDiscoveryFilter
+            if (inInternationalizationFilter && trimmedLine == "type: CognitoScopeDiscoveryFilter") {
+                if (foundCognitoScopeDiscoveryFilter) {
+                    // We already found an CognitoScopeDiscoveryFilter section, skip this one
+                    skipSection = true
+                    continue
+                } else {
+                    // First occurrence, skip and replace with new content
+                    foundCognitoScopeDiscoveryFilter = true
+                    skipSection = true
+                    outputNewContent = true
+                    continue
+                }
+            }
+            
+            // Detect end of InternationalizationFilter section
+            if (inInternationalizationFilter && trimmedLine.startsWith("-") && trimmedLine != "type: InternationalizationFilter") {
+                inInternationalizationFilter = false
+                skipSection = false
+                // Add new content before the next section
+                if (outputNewContent) {
+                    newLines.add("")
+                    newLines.addAll(sourceContent.split('\n'))
+                    outputNewContent = false
+                }
+                newLines.add(line)
+                continue
+            }
+            
+            // If we are skipping the section, continue until the end
+            if (skipSection) {
+                continue
+            }
+            
+            newLines.add(line)
+        }
+        
+        // If we still didn't add the new content, add it at the end
+        if (outputNewContent) {
+            newLines.add("")
+            newLines.addAll(sourceContent.split('\n'))
+        }
+        
+        destFile.text = newLines.join('\n')
+        
+        println "✅ CognitoScopeDiscoveryFilter section updated: ${destFile.name}"
+        return true
+    } else {
+        // Add at the end if it does not exist
+        if (destContent.endsWith('\n')) {
+            destFile.text = destContent + sourceContent
+        } else {
+            destFile.text = destContent + '\n' + sourceContent
+        }
+        println "✅ Content added to the end: ${destFile.name}"
+        return true
+    }
+}
+
+// Helper function to install YAML files on Windows
+def installYamlFiles(def projectPath, def taskName) {
+    println "🚀 Installing AWS Cognito filter YAML files on Windows..."
+    println "📋 Task: ${taskName}"
+    println "📁 Project: ${projectPath}"
+    println ""
+    
+    // Validate if the path exists
+    def projectDir = new File(projectPath)
+    if (!projectDir.exists()) {
+        println "⚠️  Warning: Directory does not exist. Creating..."
+        projectDir.mkdirs()
+    }
+    
+    // Create project structure
+    def (metaInfDir, systemDir) = createProjectStructure(projectPath)
+    
+    // Copy YAML files
+    def sourceYamlDir = new File("src/main/resources/yaml")
+    
+    // Copy YAML files
+    copyYamlFiles(sourceYamlDir, metaInfDir, systemDir)
+    
+    println ""
+    println "🎉 YAML files installation completed!"
+    println "📁 Policy Studio project: ${projectPath}"
+    println ""
+    showNextSteps()
+}
+
+// Helper function to show next steps
+def showNextSteps() {
+    println "📋 Next steps:"
+    println "1. Copy the JAR built on Linux to Windows"
+    println "2. Open Policy Studio"
+    println "3. Go to Window > Preferences > Runtime Dependencies"
+    println "4. Add the JAR: aws-cognito-scope-discovery-apim-sdk-1.0.0.jar"
+    println "5. Restart Policy Studio with -clean"
+    println "6. Search for 'Cognito Scope Discovery' in the palette"
+}
+
+// Helper function to create project directory structure
+def createProjectStructure(def projectPath) {
+    def metaInfDir = new File(projectPath, "META-INF/types/Entity/Filter/AWSFilter")
+    def systemDir = new File(projectPath, "System")
+    
+    metaInfDir.mkdirs()
+    systemDir.mkdirs()
+    
+    return [metaInfDir, systemDir]
+}
+
+// Helper function to copy YAML files
+def copyYamlFiles(def sourceYamlDir, def metaInfDir, def systemDir) {
+    // Copy CognitoScopeDiscoveryFilter.yaml
+    def sourceFilterYaml = new File(sourceYamlDir, "META-INF/types/Entity/Filter/AWSFilter/CognitoScopeDiscoveryFilter.yaml")
+    def destFilterYaml = new File(metaInfDir, "CognitoScopeDiscoveryFilter.yaml")
+    
+    if (sourceFilterYaml.exists()) {
+        destFilterYaml.text = sourceFilterYaml.text
+        println "✅ Copied: CognitoScopeDiscoveryFilter.yaml"
+    } else {
+        println "❌ File not found: ${sourceFilterYaml.absolutePath}"
+    }
+    
+    // Process internationalization file
+    def sourceIntlYaml = new File(sourceYamlDir, "System/Internationalization Default.yaml")
+    def destIntlYaml = new File(systemDir, "Internationalization Default.yaml")
+    
+    processInternationalizationFile(sourceIntlYaml, destIntlYaml)
+}
+
+// Task para instalação Windows com caminho específico
+task installWindowsToProject {
+    group = 'Installation'
+    description = 'Installs YAML in a specific Policy Studio project'
+    
+    doFirst {
+        // Get project path via system property
+        def projectPath = System.getProperty('project.path')
+        
+        if (!projectPath) {
+            // If not specified, request interactively
+            projectPath = System.console()?.readLine("📂 Enter the Policy Studio project path (ex: C:\\Users\\jbarros\\apiprojects\\my-axway-project): ")
+            
+            if (!projectPath) {
+                throw new GradleException("❌ Project path not provided! Use: -Dproject.path=C:\\path\\to\\project")
+            }
+        }
+        
+        println "📁 Project: ${projectPath}"
+        
+        // Use helper function to install YAML files
+        installYamlFiles(projectPath, "installWindowsToProject")
+    }
+}
+
+// Task para build do JAR (apenas Linux)
+task buildJarLinux {
+    group = 'Build'
+    description = 'Builds the JAR on Linux (does not work on Windows)'
+    
+    dependsOn build
+    
+    doFirst {
+        println "🔨 Building Cognito Scope Discovery Filter JAR..."
+        println "📁 JAR: build/libs/aws-cognito-scope-discovery-apim-sdk-1.0.0.jar"
+        println "⚠️  Note: This task should be run only on Linux"
+    }
+    
+    doLast {
+        def jarFile = new File("build/libs/aws-cognito-scope-discovery-apim-sdk-1.0.0.jar")
+        if (jarFile.exists()) {
+            println "✅ JAR created successfully: ${jarFile.absolutePath}"
+            println "📋 For Windows: Copy this JAR to the Windows environment"
+        } else {
+            println "❌ Error: JAR was not created"
+        }
+    }
+}
+
+// Task para mostrar informações de download dos JARs AWS
+task showAwsJars {
+    group = 'Installation'
+    description = 'Shows download links for AWS SDK JARs'
+    
+    doLast {
+        println "📦 AWS SDK JARs required for Windows:"
+        println ""
+        println "🔗 aws-java-sdk-cognitoidp-1.12.314.jar:"
+        println "   https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-cognitoidp/1.12.314/aws-java-sdk-cognitoidp-1.12.314.jar"
+        println ""
+        println "🔗 aws-java-sdk-core-1.12.314.jar:"
+        println "   https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-core/1.12.314/aws-java-sdk-core-1.12.314.jar"
+        println ""
+        println "🔗 aws-java-sdk-sts-1.12.314.jar:"
+        println "   https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-sts/1.12.314/aws-java-sdk-sts-1.12.314.jar"
+        println ""
+        println "📋 After download:"
+        println "1. Add the JARs to the Policy Studio classpath"
+        println "2. Restart Policy Studio with -clean"
+    }
+}
+
+// Task para configurar caminho do Axway
+task setAxwayPath {
+    group = 'Configuration'
+    description = 'Sets the Axway API Gateway path'
+    
+    doLast {
+        println "🔧 Axway API Gateway configuration"
+        println ""
+        println "📁 Current path: ${axway_base}"
+        println "📁 APIM: ${apim_folder}"
+        println "📁 Policy Studio: ${ps_folder}"
+        println ""
+        println "💡 To change the path, use:"
+        println "   ./gradlew -Daxway.base=/path/to/axway build"
+        println "   ./gradlew -Daxway.base=/opt/axway/Axway-7.7.0.20240830 installLinux"
+        println ""
+        println "📋 Examples:"
+        println "   ./gradlew -Daxway.base=/opt/axway/Axway-7.7.0.20210830 build"
+        println "   ./gradlew -Daxway.base=/home/user/axway/Axway-7.7.0.20240830 installLinux"
+    }
+}
+
+// Task to show project information
+task showProjectInfo {
+    group = 'Help'
+    description = 'Shows detailed project information'
+    
+    doLast {
+        println "📋 AWS Cognito Scope Discovery APIM SDK Project Information"
+        println "========================================================="
+        println ""
+        println "🏷️  Current version: ${version}"
+        println "📦 Group: ${group}"
+        println "🔧 Java: ${sourceCompatibility}"
+        println ""
+        println "📁 Project structure:"
+        println "  - src/main/java/     # Java source code"
+        println "  - src/main/resources/ # Resources (YAML, etc.)"
+        println "  - scripts/           # Installation scripts"
+        println "  - docs/              # Documentation"
+        println ""
+        println "🔗 Main dependencies:"
+        println "  - AWS SDK Cognito: 1.12.314"
+        println "  - AWS SDK Core: 1.12.314"
+        println "  - AWS SDK STS: 1.12.314"
+        println "  - Axway API Gateway: 7.7.0.20240830"
+        println ""
+        println "🚀 Features:"
+        println "  - Cognito Scope Discovery filter for Axway API Gateway"
+        println "  - Dynamic scope mapping for AWS Cognito"
+        println "  - Support for multiple Axway versions"
+        println "  - Automated installation (Linux/Windows)"
+        println "  - Automatic semantic versioning"
+        println "  - Automatic release system"
+    }
+}
+
+// Task to show all available tasks
+task showTasks {
+    group = 'Help'
+    description = 'Shows all available tasks'
+    
+    doLast {
+        println "🚀 Available tasks:"
+        println ""
+        println "📦 Build:"
+        println "  ./gradlew build                    # Project build (Linux)"
+        println "  ./gradlew buildJarLinux           # JAR build (Linux only)"
+        println "  ./gradlew clean build             # Clean + Build"
+        println ""
+        println "🔧 Configuration:"
+        println "  ./gradlew setAxwayPath            # Shows Axway configuration"
+        println "  ./gradlew showProjectInfo         # Shows project information"
+        println ""
+        println "🔧 Linux Installation:"
+        println "  ./gradlew installLinux            # Installs on Linux (JAR + YAML)"
+        println "  ./gradlew -Daxway.base=/path installLinux  # With custom path"
+        println ""
+        println "🔧 Windows Installation:"
+        println "  ./gradlew installWindows          # Installs YAML on Windows (interactive)"
+        println "  ./gradlew -Dproject.path=/path installWindowsToProject  # Installs YAML in specific project"
+        println "  ./gradlew showAwsJars             # Shows AWS JAR links"
+        println ""
+        println "❓ Help:"
+        println "  ./gradlew showTasks               # Shows this list"
+        println "  ./gradlew tasks                   # Lists all tasks"
+    }
+}
+
+

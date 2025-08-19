@@ -1,0 +1,419 @@
+name: Build Multi-Version JARs (Lambda + Cognito)
+
+on:
+  push:
+    branches: [ master, main, develop ]
+    paths:
+      - 'src/**'
+      - 'build.gradle'
+      - 'gradle/**'
+      - 'axway-versions.json'
+  pull_request:
+    branches: [ master, main, develop ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Axway version to build'
+        required: false
+        default: '7.7.0.20240830'
+        type: string
+
+jobs:
+  build-multi-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Parse versions
+      id: versions
+      run: |
+        if [ "${{ github.event.inputs.version }}" != "" ]; then
+          # Specific build
+          echo "versions=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          # Build all versions
+          versions=$(jq -r '.versions | keys[]' axway-versions.json | tr '\n' ',' | sed 's/,$//')
+          echo "versions=$versions" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "📋 Versions to build: ${{ steps.versions.outputs.versions }}"
+        
+    - name: Build for each version
+      id: build
+      run: |
+        # Use semantic versioning script
+        echo "🔍 Running semantic versioning..."
+        chmod +x scripts/version-bump.sh
+        ./scripts/version-bump.sh
+        
+        # Read updated version from .version_info file
+        if [ -f ".version_info" ]; then
+          source .version_info
+          echo "📋 Calculated version: $NEW_VERSION ($VERSION_TYPE)"
+          RELEASE_VERSION="$NEW_VERSION"
+        else
+          echo "⚠️  .version_info file not found, using current version"
+          RELEASE_VERSION=$(grep -o 'version = "[^"]*"' build.gradle | cut -d'"' -f2)
+        fi
+        
+        # Check if version was detected correctly
+        echo "📋 Version read from build.gradle: '$RELEASE_VERSION'"
+        if [ -z "$RELEASE_VERSION" ] || [ "$RELEASE_VERSION" = "" ]; then
+          echo "⚠️  Empty version detected, trying to read again..."
+          # Try reading again after a short delay
+          sleep 2
+          RELEASE_VERSION=$(grep -o 'version = "[^"]*"' build.gradle | cut -d'"' -f2)
+          echo "📋 Version after retry: '$RELEASE_VERSION'"
+        fi
+        
+        # Save version as output for other jobs
+        echo "release_version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
+        echo "📋 Version saved as output: $RELEASE_VERSION"
+        
+        VERSIONS="${{ steps.versions.outputs.versions }}"
+        
+        for VERSION in ${VERSIONS//,/ }; do
+          echo "🔧 Build for version: $VERSION"
+          
+          # Extract version information
+          VERSION_INFO=$(jq -r ".versions[\"$VERSION\"]" axway-versions.json)
+          DOCKER_IMAGE=$(echo "$VERSION_INFO" | jq -r '.docker_image')
+          BASE_PATH=$(echo "$VERSION_INFO" | jq -r '.base_path')
+          
+          echo "🐳 Docker image: $DOCKER_IMAGE"
+          echo "📁 Base path: $BASE_PATH"
+          
+          # Pull Docker image (if exists)
+          if docker pull "$DOCKER_IMAGE" 2>/dev/null; then
+            echo "✅ Image found: $DOCKER_IMAGE"
+          else
+            echo "⚠️  Image not found: $DOCKER_IMAGE"
+            echo "📋 Image build will be required"
+          fi
+          
+          # Build with Docker
+          docker run --rm \
+            -v "$(pwd):/workspace" \
+            -w /workspace \
+            "$DOCKER_IMAGE" \
+            gradle -Daxway.base="$BASE_PATH" clean build copyExternalDependencies listDependencies
+          
+          # Check result
+          JAR_FILE=$(find build/libs -name "aws-lambda-apim-sdk-*.jar" | head -1)
+          if [ -n "$JAR_FILE" ]; then
+            echo "✅ JAR created for $VERSION: $JAR_FILE"
+            ls -la "$JAR_FILE"
+            
+            # Copy JAR to current directory with version name
+            cp "$JAR_FILE" "./aws-lambda-apim-sdk-$VERSION.jar"
+            echo "✅ JAR copied: aws-lambda-apim-sdk-$VERSION.jar"
+            
+            # Check for external JARs (dependencies not in Gateway)
+            echo "🔍 Checking for external dependencies..."
+            if [ -d "${BASE_PATH}/apigateway/system/lib" ]; then
+              # List external JARs that may be needed
+              echo "📋 JARs available in Axway:"
+              ls -la "${BASE_PATH}/apigateway/system/lib"/*.jar 2>/dev/null || echo "No JAR found"
+            fi
+          else
+            echo "❌ JAR not found for $VERSION"
+            echo "📁 Content of build/libs:"
+            ls -la build/libs/ || echo "Directory build/libs does not exist"
+            exit 1
+          fi
+        done
+        
+    - name: Upload JARs as artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: aws-lambda-apim-sdk-jars
+        path: build/libs/aws-lambda-apim-sdk-*.jar
+        retention-days: 30
+        
+    - name: Create Single Release with all JARs
+      if: github.event_name != 'pull_request' && contains(github.ref, 'master')
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # Configure git
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        
+        # Get version from build job
+        RELEASE_VERSION="${{ steps.build.outputs.release_version }}"
+        echo "📋 Version obtained from build job: '$RELEASE_VERSION'"
+        
+        # Check if version was obtained
+        if [ -z "$RELEASE_VERSION" ] || [ "$RELEASE_VERSION" = "" ]; then
+          echo "⚠️  Version not obtained from build job, trying to read from build.gradle..."
+          RELEASE_VERSION=$(grep -o 'version = "[^"]*"' build.gradle | cut -d'"' -f2)
+          echo "📋 Version read from build.gradle: '$RELEASE_VERSION'"
+        fi
+        
+        if [ -z "$RELEASE_VERSION" ]; then
+          echo "⚠️  Version still not detected, using fallback"
+          RELEASE_VERSION="1.0.0"
+        fi
+        
+        echo "📋 Final release version: $RELEASE_VERSION"
+        
+        # Check if tag already exists and increment if necessary
+        TAG_NAME="v${RELEASE_VERSION}"
+        ORIGINAL_VERSION="$RELEASE_VERSION"
+        
+        # Loop to find an available version
+        while git tag -l "$TAG_NAME" | grep -q "$TAG_NAME"; do
+          echo "⚠️  Tag $TAG_NAME already exists. Incrementing version..."
+          # Increment PATCH version
+          NEW_PATCH=$(echo "$RELEASE_VERSION" | awk -F. '{print $3+1}')
+          RELEASE_VERSION=$(echo "$RELEASE_VERSION" | awk -F. '{print $1 "." $2 "." '$NEW_PATCH'}')
+          TAG_NAME="v${RELEASE_VERSION}"
+          echo "📋 Trying new version: $RELEASE_VERSION"
+        done
+        
+        # Update build.gradle if version changed
+        if [ "$RELEASE_VERSION" != "$ORIGINAL_VERSION" ]; then
+          sed -i "s/version = \"[^\"]*\"/version = \"$RELEASE_VERSION\"/" build.gradle
+          echo "✅ build.gradle updated with version: $RELEASE_VERSION"
+          
+          # Commit version change
+          git add build.gradle
+          git commit -m "chore: update version to $RELEASE_VERSION [skip ci]"
+          git push origin master
+          echo "✅ Version $RELEASE_VERSION commit sent"
+        fi
+        
+        echo "📋 Final version: $RELEASE_VERSION (Tag: $TAG_NAME)"
+        
+        # Create tag
+        git tag "$TAG_NAME"
+        git push origin "$TAG_NAME"
+        echo "✅ Tag $TAG_NAME created and sent!"
+        
+        # Prepare JARs for upload
+        JAR_FILES=""
+        VERSIONS="${{ steps.versions.outputs.versions }}"
+        
+        for VERSION in ${VERSIONS//,/ }; do
+          JAR_FILE="aws-lambda-apim-sdk-$VERSION.jar"
+          if [ -f "$JAR_FILE" ]; then
+            JAR_FILES="$JAR_FILES $JAR_FILE"
+            echo "✅ JAR found: $JAR_FILE"
+          else
+            echo "❌ JAR not found: $JAR_FILE"
+          fi
+        done
+        
+        # Create ZIPs for each version with organized structure
+        VERSIONS="${{ steps.versions.outputs.versions }}"
+        RELEASE_DATE=$(date +%Y%m%d-%H%M%S)
+        
+        for VERSION in ${VERSIONS//,/ }; do
+          echo "📦 Creating ZIP for version: $VERSION"
+          
+          # Create temporary directory for ZIP
+          ZIP_DIR="aws-lambda-apim-sdk-${RELEASE_VERSION}-${VERSION}-${RELEASE_DATE}"
+          mkdir -p "$ZIP_DIR"
+          
+          # Copy main JAR (compiled version from build/libs)
+          BUILD_JAR=$(find build/libs -name "aws-lambda-apim-sdk-*.jar" | head -1)
+          if [ -n "$BUILD_JAR" ]; then
+            cp "$BUILD_JAR" "$ZIP_DIR/"
+            echo "✅ JAR from build copied: $(basename "$BUILD_JAR")"
+          fi
+          
+          # Copy installation scripts (Linux only)
+          # Note: install-windows.bat removed - use Gradle tasks on Windows
+          
+          if [ -f "scripts/install-linux.sh" ]; then
+            cp scripts/install-linux.sh "$ZIP_DIR/"
+            echo "✅ Script Linux copied: install-linux.sh"
+          fi
+          
+          # Copy gradlew if exists
+          if [ -f "gradlew" ]; then
+            cp gradlew "$ZIP_DIR/"
+            echo "✅ Gradlew copied: gradlew"
+          fi
+          
+          if [ -f "gradlew.bat" ]; then
+            cp gradlew.bat "$ZIP_DIR/"
+            echo "✅ Gradlew Windows copied: gradlew.bat"
+          fi
+          
+          # Copy build.gradle to allow use of installWindows task
+          if [ -f "build.gradle" ]; then
+            cp build.gradle "$ZIP_DIR/"
+            echo "✅ Build.gradle copied: build.gradle"
+          fi
+          
+          # Copy gradle folder (required for Gradle Wrapper)
+          if [ -d "gradle" ]; then
+            cp -r gradle "$ZIP_DIR/"
+            echo "✅ Gradle folder copied: gradle/"
+          fi
+          
+          # Copy Policy Studio resources (fed and yaml) - keep original structure
+          if [ -d "src/main/resources/fed" ]; then
+            mkdir -p "$ZIP_DIR/src/main/resources/fed"
+            cp -r src/main/resources/fed/* "$ZIP_DIR/src/main/resources/fed/"
+            echo "✅ FED resources copied: src/main/resources/fed/"
+          fi
+          
+          if [ -d "src/main/resources/yaml" ]; then
+            mkdir -p "$ZIP_DIR/src/main/resources/yaml"
+            cp -r src/main/resources/yaml/* "$ZIP_DIR/src/main/resources/yaml/"
+            echo "✅ YAML resources copied: src/main/resources/yaml/"
+          fi
+          
+          # Copy external dependencies (created by Gradle task)
+          echo "📋 Copying external dependencies created by Gradle..."
+          mkdir -p "$ZIP_DIR/dependencies"
+          
+          # Check if Gradle task created the dependencies folder
+          if [ -d "dependencies" ] && [ "$(ls -A dependencies 2>/dev/null)" ]; then
+            echo "📁 Dependencies folder found with content:"
+            ls -la dependencies/
+            cp -r dependencies/* "$ZIP_DIR/dependencies/" 2>/dev/null || echo "⚠️  Error copying dependencies"
+            echo "✅ Dependencies copied to $ZIP_DIR/dependencies/"
+          else
+            echo "⚠️  Dependencies folder not found or empty"
+            echo "🔍 Checking if AWS JARs are in build/libs..."
+            
+            # Fallback: search for AWS JARs in build/libs
+            AWS_JARS=$(find build/libs -name "*aws-java-sdk-*" -type f 2>/dev/null)
+            if [ -n "$AWS_JARS" ]; then
+              echo "✅ AWS JARs found in build/libs:"
+              for JAR in $AWS_JARS; do
+                echo "  - $(basename "$JAR")"
+                cp "$JAR" "$ZIP_DIR/dependencies/"
+              done
+            else
+              echo "⚠️  No AWS JARs found in build/libs"
+            fi
+          fi
+          
+          # Check final content of dependencies folder
+          if [ -d "$ZIP_DIR/dependencies" ] && [ "$(ls -A "$ZIP_DIR/dependencies" 2>/dev/null)" ]; then
+            echo "✅ Final dependencies in $ZIP_DIR/dependencies/:"
+            ls -la "$ZIP_DIR/dependencies/"
+          else
+            echo "⚠️  Final dependencies folder is empty"
+          fi
+          
+          # Check if there are JARs in the dependencies folder
+          if [ -d "$ZIP_DIR/dependencies" ] && [ "$(ls -A "$ZIP_DIR/dependencies" 2>/dev/null)" ]; then
+            echo "✅ External dependencies copied to $ZIP_DIR/dependencies/"
+            ls -la "$ZIP_DIR/dependencies/"
+          else
+            echo "⚠️  No external dependencies found"
+          fi
+          
+          # Create README with information
+          echo "# AWS Lambda + Cognito APIM SDK" > "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "Release Version: $RELEASE_VERSION" >> "$ZIP_DIR/README.md"
+          echo "Axway Version: $VERSION" >> "$ZIP_DIR/README.md"
+          echo "Release Date: $RELEASE_DATE" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "## Included Filters" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "### AWS Lambda Filter" >> "$ZIP_DIR/README.md"
+          echo "- **InvokeLambdaFunctionFilter**: Executa funções AWS Lambda diretamente do Policy Studio" >> "$ZIP_DIR/README.md"
+          echo "- Suporte completo a credenciais AWS (IAM Role, arquivo, explícitas)" >> "$ZIP_DIR/README.md"
+          echo "- Configuração avançada de cliente AWS" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "### AWS Cognito Filter" >> "$ZIP_DIR/README.md"
+          echo "- **CognitoScopeDiscoveryFilter**: Descoberta dinâmica de scopes para AWS Cognito" >> "$ZIP_DIR/README.md"
+          echo "- Mapeamento automático de scopes simples para formato completo do Cognito" >> "$ZIP_DIR/README.md"
+          echo "- Cache inteligente para otimização de performance" >> "$ZIP_DIR/README.md"
+          echo "- Suporte a múltiplos clientes com diferentes prefixos de scope" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "## Installation" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "### Automatic Installation" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "**Linux:**" >> "$ZIP_DIR/README.md"
+          echo "1. Set the AXWAY_HOME variable (e.g.: /opt/Axway/API_Gateway/7.7.0.20240830)" >> "$ZIP_DIR/README.md"
+          echo "2. Run: ./install-linux.sh" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "### Manual Installation" >> "$ZIP_DIR/README.md"
+          echo "1. Copy the main JAR to \$AXWAY_HOME/ext/lib/" >> "$ZIP_DIR/README.md"
+          echo "2. Copy the dependencies (dependencies/ folder) if needed" >> "$ZIP_DIR/README.md"
+          echo "3. Restart Policy Studio and API Gateway" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "### Installation via Gradle (Windows)" >> "$ZIP_DIR/README.md"
+          echo "1. Open the command prompt in the ZIP directory" >> "$ZIP_DIR/README.md"
+          echo "2. Run: .\\gradlew \"-Dproject.path=C:\\Users\\jbarros\\apiprojects\\my-axway-project\" installWindowsToProject" >> "$ZIP_DIR/README.md"
+          echo "3. The path will be used automatically without interaction" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "## Included files" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "- aws-lambda-apim-sdk-*.jar - Main SDK (original build version)" >> "$ZIP_DIR/README.md"
+          echo "- dependencies/ - External Gradle dependencies" >> "$ZIP_DIR/README.md"
+          echo "- src/main/resources/fed/ - Policy Studio FED resources" >> "$ZIP_DIR/README.md"
+          echo "- src/main/resources/yaml/ - Policy Studio YAML resources" >> "$ZIP_DIR/README.md"
+          echo "- install-linux.sh - Installation script for Linux" >> "$ZIP_DIR/README.md"
+          echo "- gradlew / gradlew.bat - Gradle Wrapper for builds" >> "$ZIP_DIR/README.md"
+          echo "- gradle/ - Gradle Wrapper folder (required to run tasks)" >> "$ZIP_DIR/README.md"
+          echo "- build.gradle - Gradle configuration (includes installWindows and installWindowsToProject tasks)" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "## Compatibility" >> "$ZIP_DIR/README.md"
+          echo "" >> "$ZIP_DIR/README.md"
+          echo "This SDK was tested with Axway API Gateway $VERSION" >> "$ZIP_DIR/README.md"
+          
+          # Create ZIP
+          ZIP_NAME="aws-lambda-apim-sdk-${RELEASE_VERSION}-${VERSION}-${RELEASE_DATE}.zip"
+          zip -r "$ZIP_NAME" "$ZIP_DIR/"
+          echo "✅ ZIP created: $ZIP_NAME"
+          
+          # Clean up temporary directory
+          rm -rf "$ZIP_DIR"
+        done
+        
+        # Generate intelligent release notes
+        echo "📝 Generating intelligent release notes..."
+        chmod +x scripts/generate-release-notes.sh
+        
+        # Get previous tag
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+        echo "📋 Previous tag: $PREVIOUS_TAG"
+        
+        # Generate release notes
+        ./scripts/generate-release-notes.sh "$PREVIOUS_TAG" "$TAG_NAME" "$RELEASE_VERSION"
+        
+        # Read generated release notes
+        if [ -f .release_notes ]; then
+          RELEASE_NOTES=$(cat .release_notes)
+          echo "✅ Release notes generated successfully"
+        else
+          echo "⚠️  Failed to generate release notes, using fallback"
+          RELEASE_NOTES="Build for multiple Axway API Gateway versions - Version: $RELEASE_VERSION - Date: $RELEASE_DATE"
+        fi
+        
+        # Create release with ZIPs and intelligent release notes
+        ZIP_FILES=$(ls aws-lambda-apim-sdk-*.zip 2>/dev/null)
+        if [ -n "$ZIP_FILES" ]; then
+          echo "🚀 Creating release with ZIPs: $ZIP_FILES"
+          gh release create "$TAG_NAME" \
+            --title "Release v${RELEASE_VERSION} - Multi-Version (Lambda + Cognito)" \
+            --notes "$RELEASE_NOTES" \
+            --repo "${{ github.repository }}" \
+            $ZIP_FILES
+          echo "✅ Release created successfully!"
+        else
+          echo "❌ No ZIP found for upload"
+          exit 1
+        fi 

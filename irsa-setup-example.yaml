@@ -1,0 +1,153 @@
+# Configuração IRSA para Axway Gateway
+# Account: 785212834098
+# Region: sa-east-1
+# Function: uat-corporate-services-cpv
+
+---
+# 1. ServiceAccount com IAM Role
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: axway-lambda-sa
+  namespace: axway  # Ajuste para o namespace correto
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::785212834098:role/axway-lambda-role"
+    eks.amazonaws.com/audience: "sts.amazonaws.com"
+    eks.amazonaws.com/token-expiration: "3600"
+    # Tags para organização
+    axway.com/project: "lambda-sdk"
+    axway.com/environment: "presales-latam"
+    axway.com/owner: "joaojbarros@axway.com"
+
+---
+# 2. IAM Role Policy (criar via AWS CLI)
+# aws iam create-policy --policy-name AxwayLambdaPolicy --policy-document file://lambda-policy.json
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lambda-policy-example
+  namespace: axway
+data:
+  lambda-policy.json: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "lambda:InvokeFunction",
+            "lambda:GetFunction",
+            "lambda:ListFunctions",
+            "lambda:GetFunctionConfiguration"
+          ],
+          "Resource": [
+            "arn:aws:lambda:sa-east-1:785212834098:function:uat-corporate-services-cpv",
+            "arn:aws:lambda:sa-east-1:785212834098:function:*"
+          ]
+        }
+      ]
+    }
+
+---
+# 3. Trust Policy (criar via AWS CLI)
+# aws iam create-role --role-name axway-lambda-role --assume-role-policy-document file://trust-policy.json
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trust-policy-example
+  namespace: axway
+data:
+  trust-policy.json: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::785212834098:oidc-provider/oidc.eks.sa-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.sa-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE:aud": "sts.amazonaws.com",
+              "oidc.eks.sa-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE:sub": "system:serviceaccount:axway:axway-lambda-sa"
+            }
+          }
+        }
+      ]
+    }
+
+---
+# 4. Deployment com ServiceAccount
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: axway-gateway
+  namespace: axway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: axway-gateway
+  template:
+    metadata:
+      labels:
+        app: axway-gateway
+    spec:
+      serviceAccountName: axway-lambda-sa  # IMPORTANTE: Usar o ServiceAccount
+      containers:
+      - name: axway-gateway
+        image: axway/gateway:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: AWS_REGION
+          value: "sa-east-1"
+        - name: AWS_DEFAULT_REGION
+          value: "sa-east-1"
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+
+---
+# 5. Service para o Gateway
+apiVersion: v1
+kind: Service
+metadata:
+  name: axway-gateway-service
+  namespace: axway
+spec:
+  selector:
+    app: axway-gateway
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# 6. Ingress (opcional)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: axway-gateway-ingress
+  namespace: axway
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: uat-apitraffic-axway.cbssdigital.com.br
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: axway-gateway-service
+            port:
+              number: 80 
