@@ -1,8 +1,0 @@
-type: Internationalization
-name: Internationalization
-description: Internationalization settings
-fields:
-  - name: name
-    type: string
-    required: true
-    description: Name of the internationalization setting

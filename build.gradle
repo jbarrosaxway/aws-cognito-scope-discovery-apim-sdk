@@ -346,7 +346,7 @@ def createProjectStructure(def projectPath) {
 // Helper function to copy YAML files
 def copyYamlFiles(def sourceYamlDir, def metaInfDir, def systemDir) {
     // Copy CognitoScopeDiscoveryFilter.yaml
-    def sourceFilterYaml = new File(sourceYamlDir, "META-INF/types/Entity/Filter/AWSFilter/CognitoScopeDiscoveryFilter.yaml")
+    def sourceFilterYaml = new File(sourceYamlDir, "META-INF/types/Entity/Filter/CognitoScopeDiscoveryFilter.yaml")
     def destFilterYaml = new File(metaInfDir, "CognitoScopeDiscoveryFilter.yaml")
     
     if (sourceFilterYaml.exists()) {

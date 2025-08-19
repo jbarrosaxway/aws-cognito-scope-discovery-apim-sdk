@@ -454,8 +454,7 @@ aws-cognito-scope-discovery-apim-sdk/
 │                   └── types/
 │                       └── Entity/
 │                           └── Filter/
-│                               └── AWSFilter/
-│                                   └── CognitoScopeDiscoveryFilter.yaml
+│                               └── CognitoScopeDiscoveryFilter.yaml
 └── build/                                   # Build output (generated)
     └── libs/
         └── aws-cognito-scope-discovery-apim-sdk-<version>.jar
