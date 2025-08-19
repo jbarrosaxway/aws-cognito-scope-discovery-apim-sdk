@@ -110,14 +110,14 @@ jobs:
             gradle -Daxway.base="$BASE_PATH" clean build copyExternalDependencies listDependencies
           
           # Check result
-          JAR_FILE=$(find build/libs -name "aws-lambda-apim-sdk-*.jar" | head -1)
+          JAR_FILE=$(find build/libs -name "aws-cognito-scope-discovery-apim-sdk-*.jar" | head -1)
           if [ -n "$JAR_FILE" ]; then
             echo "✅ JAR created for $VERSION: $JAR_FILE"
             ls -la "$JAR_FILE"
             
             # Copy JAR to current directory with version name
-            cp "$JAR_FILE" "./aws-lambda-apim-sdk-$VERSION.jar"
-            echo "✅ JAR copied: aws-lambda-apim-sdk-$VERSION.jar"
+            cp "$JAR_FILE" "./aws-cognito-scope-discovery-apim-sdk-$VERSION.jar"
+            echo "✅ JAR copied: aws-cognito-scope-discovery-apim-sdk-$VERSION.jar"
             
             # Check for external JARs (dependencies not in Gateway)
             echo "🔍 Checking for external dependencies..."
@@ -137,8 +137,8 @@ jobs:
     - name: Upload JARs as artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: aws-lambda-apim-sdk-jars
-        path: build/libs/aws-lambda-apim-sdk-*.jar
+        name: aws-cognito-scope-discovery-apim-sdk-jars
+        path: build/libs/aws-cognito-scope-discovery-apim-sdk-*.jar
         retention-days: 30
         
     - name: Create Single Release with all JARs
@@ -207,7 +207,7 @@ jobs:
         VERSIONS="${{ steps.versions.outputs.versions }}"
         
         for VERSION in ${VERSIONS//,/ }; do
-          JAR_FILE="aws-lambda-apim-sdk-$VERSION.jar"
+          JAR_FILE="aws-cognito-scope-discovery-apim-sdk-$VERSION.jar"
           if [ -f "$JAR_FILE" ]; then
             JAR_FILES="$JAR_FILES $JAR_FILE"
             echo "✅ JAR found: $JAR_FILE"
@@ -224,11 +224,11 @@ jobs:
           echo "📦 Creating ZIP for version: $VERSION"
           
           # Create temporary directory for ZIP
-          ZIP_DIR="aws-lambda-apim-sdk-${RELEASE_VERSION}-${VERSION}-${RELEASE_DATE}"
+          ZIP_DIR="aws-cognito-scope-discovery-apim-sdk-${RELEASE_VERSION}-${VERSION}-${RELEASE_DATE}"
           mkdir -p "$ZIP_DIR"
           
           # Copy main JAR (compiled version from build/libs)
-          BUILD_JAR=$(find build/libs -name "aws-lambda-apim-sdk-*.jar" | head -1)
+          BUILD_JAR=$(find build/libs -name "aws-cognito-scope-discovery-apim-sdk-*.jar" | head -1)
           if [ -n "$BUILD_JAR" ]; then
             cp "$BUILD_JAR" "$ZIP_DIR/"
             echo "✅ JAR from build copied: $(basename "$BUILD_JAR")"
@@ -361,7 +361,7 @@ jobs:
           echo "" >> "$ZIP_DIR/README.md"
           echo "## Included files" >> "$ZIP_DIR/README.md"
           echo "" >> "$ZIP_DIR/README.md"
-          echo "- aws-lambda-apim-sdk-*.jar - Main SDK (original build version)" >> "$ZIP_DIR/README.md"
+          echo "- aws-cognito-scope-discovery-apim-sdk-*.jar - Main SDK (original build version)" >> "$ZIP_DIR/README.md"
           echo "- dependencies/ - External Gradle dependencies" >> "$ZIP_DIR/README.md"
           echo "- src/main/resources/fed/ - Policy Studio FED resources" >> "$ZIP_DIR/README.md"
           echo "- src/main/resources/yaml/ - Policy Studio YAML resources" >> "$ZIP_DIR/README.md"
@@ -375,7 +375,7 @@ jobs:
           echo "This SDK was tested with Axway API Gateway $VERSION" >> "$ZIP_DIR/README.md"
           
           # Create ZIP
-          ZIP_NAME="aws-lambda-apim-sdk-${RELEASE_VERSION}-${VERSION}-${RELEASE_DATE}.zip"
+          ZIP_NAME="aws-cognito-scope-discovery-apim-sdk-${RELEASE_VERSION}-${VERSION}-${RELEASE_DATE}.zip"
           zip -r "$ZIP_NAME" "$ZIP_DIR/"
           echo "✅ ZIP created: $ZIP_NAME"
           
@@ -404,7 +404,7 @@ jobs:
         fi
         
         # Create release with ZIPs and intelligent release notes
-        ZIP_FILES=$(ls aws-lambda-apim-sdk-*.zip 2>/dev/null)
+        ZIP_FILES=$(ls aws-cognito-scope-discovery-apim-sdk-*.zip 2>/dev/null)
         if [ -n "$ZIP_FILES" ]; then
           echo "🚀 Creating release with ZIPs: $ZIP_FILES"
           gh release create "$TAG_NAME" \
