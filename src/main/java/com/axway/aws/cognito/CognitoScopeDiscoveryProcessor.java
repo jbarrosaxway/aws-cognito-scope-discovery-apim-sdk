@@ -119,9 +119,11 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             Map<String, String> scopePrefixes = discoverScopesFromCognito(userPoolIdValue, clientIdValue);
             
             // Process input scopes if provided
+            String processedScopes = "";
+            String mappedScopes = "";
             if (scopesInputValue != null && !scopesInputValue.trim().isEmpty()) {
-                String processedScopes = processInputScopes(scopesInputValue);
-                String mappedScopes = mapInputScopes(scopesInputValue, scopePrefixes);
+                processedScopes = processInputScopes(scopesInputValue);
+                mappedScopes = mapInputScopes(scopesInputValue, scopePrefixes);
                 
                 message.put("cognito.scopes.input_processed", processedScopes);
                 message.put("cognito.scopes.input_mapped", mappedScopes);
@@ -135,8 +137,20 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             message.put("cognito.scopes.mapped", String.join(", ", scopePrefixes.values()));
             message.put("cognito.scopes.prefixes", String.join(", ", scopePrefixes.keySet()));
             message.put("cognito.scopes.count", scopePrefixes.size());
+            message.put("cognito.scopes.input_processed", processedScopes);
+            message.put("cognito.scopes.input_mapped", mappedScopes);
             message.put("cognito.scopes.cache_hit", false);
             message.put("cognito.scopes.last_updated", java.time.Instant.now().toString());
+
+            // Set UI output fields
+            message.put("outputScopesAvailable", String.join(", ", scopePrefixes.keySet()));
+            message.put("outputScopesMapped", String.join(", ", scopePrefixes.values()));
+            message.put("outputScopesPrefixes", String.join(", ", scopePrefixes.keySet()));
+            message.put("outputScopesCount", scopePrefixes.size());
+            message.put("outputScopesInputProcessed", processedScopes);
+            message.put("outputScopesInputMapped", mappedScopes);
+            message.put("outputCacheHit", false);
+            message.put("outputLastUpdated", java.time.Instant.now().toString());
 
             Trace.info("Descoberta de scopes concluída com sucesso");
             return true;
