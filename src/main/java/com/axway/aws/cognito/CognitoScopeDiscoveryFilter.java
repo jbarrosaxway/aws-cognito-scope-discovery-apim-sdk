@@ -21,7 +21,7 @@ public class CognitoScopeDiscoveryFilter extends DefaultFilter {
 		this.reqProps.add(new PropDef("credentialsFilePath", String.class));
 		this.reqProps.add(new PropDef("scopesInput", String.class));
 		
-		// Generated properties (output fields)
+		// Generated properties (output fields) - used internally by the circuit
 		this.genProps.add(new PropDef("cognito.scopes.available",String.class));
 		this.genProps.add(new PropDef("cognito.scopes.mapped",String.class));
 		this.genProps.add(new PropDef("cognito.scopes.prefixes",String.class));
@@ -30,16 +30,6 @@ public class CognitoScopeDiscoveryFilter extends DefaultFilter {
 		this.genProps.add(new PropDef("cognito.scopes.input_mapped",String.class));
 		this.genProps.add(new PropDef("cognito.scopes.cache_hit",Boolean.class));
 		this.genProps.add(new PropDef("cognito.scopes.last_updated",String.class));
-		
-		// Output fields for UI display
-		this.genProps.add(new PropDef("outputScopesAvailable",String.class));
-		this.genProps.add(new PropDef("outputScopesMapped",String.class));
-		this.genProps.add(new PropDef("outputScopesPrefixes",String.class));
-		this.genProps.add(new PropDef("outputScopesCount",Integer.class));
-		this.genProps.add(new PropDef("outputScopesInputProcessed",String.class));
-		this.genProps.add(new PropDef("outputScopesInputMapped",String.class));
-		this.genProps.add(new PropDef("outputCacheHit",Boolean.class));
-		this.genProps.add(new PropDef("outputLastUpdated",String.class));
 	}
 
 	@Override

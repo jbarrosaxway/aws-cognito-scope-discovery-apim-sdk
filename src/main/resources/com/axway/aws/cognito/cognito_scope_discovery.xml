@@ -47,41 +47,6 @@
 						required="false" />
 				</panel>
 			</tab>
-			<tab label="AWS_COGNITO_TAB_OUTPUT_LABEL">
-				<panel columns="2">
-					<TextAttribute field="outputScopesAvailable" label="AWS_COGNITO_OUTPUT_SCOPES_AVAILABLE_LABEL"
-						displayName="AWS_COGNITO_OUTPUT_SCOPES_AVAILABLE_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_AVAILABLE_DESCRIPTION" 
-						readonly="true" />
-
-					<TextAttribute field="outputScopesMapped" label="AWS_COGNITO_OUTPUT_SCOPES_MAPPED_LABEL"
-						displayName="AWS_COGNITO_OUTPUT_SCOPES_MAPPED_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_MAPPED_DESCRIPTION" 
-						readonly="true" />
-
-					<TextAttribute field="outputScopesPrefixes" label="AWS_COGNITO_OUTPUT_SCOPES_PREFIXES_LABEL"
-						displayName="AWS_COGNITO_OUTPUT_SCOPES_PREFIXES_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_PREFIXES_DESCRIPTION" 
-						readonly="true" />
-
-					<TextAttribute field="outputScopesCount" label="AWS_COGNITO_OUTPUT_SCOPES_COUNT_LABEL"
-						displayName="AWS_COGNITO_OUTPUT_SCOPES_COUNT_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_COUNT_DESCRIPTION" 
-						readonly="true" />
-
-					<TextAttribute field="outputScopesInputProcessed" label="AWS_COGNITO_OUTPUT_SCOPES_INPUT_PROCESSED_LABEL"
-						displayName="AWS_COGNITO_OUTPUT_SCOPES_INPUT_PROCESSED_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_INPUT_PROCESSED_DESCRIPTION" 
-						readonly="true" />
-
-					<TextAttribute field="outputScopesInputMapped" label="AWS_COGNITO_OUTPUT_SCOPES_INPUT_MAPPED_LABEL"
-						displayName="AWS_COGNITO_OUTPUT_SCOPES_INPUT_MAPPED_NAME" description="AWS_COGNITO_OUTPUT_SCOPES_INPUT_MAPPED_DESCRIPTION" 
-						readonly="true" />
-
-					<TextAttribute field="outputCacheHit" label="AWS_COGNITO_OUTPUT_CACHE_HIT_LABEL"
-						displayName="AWS_COGNITO_OUTPUT_CACHE_HIT_NAME" description="AWS_COGNITO_OUTPUT_CACHE_HIT_DESCRIPTION" 
-						readonly="true" />
-
-					<TextAttribute field="outputLastUpdated" label="AWS_COGNITO_OUTPUT_LAST_UPDATED_LABEL"
-						displayName="AWS_COGNITO_OUTPUT_LAST_UPDATED_NAME" description="AWS_COGNITO_OUTPUT_LAST_UPDATED_DESCRIPTION" 
-						readonly="true" />
-				</panel>
-			</tab>
 		</tabFolder>
 	</panel>
 </ui>

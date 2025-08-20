@@ -142,16 +142,6 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             message.put("cognito.scopes.cache_hit", false);
             message.put("cognito.scopes.last_updated", java.time.Instant.now().toString());
 
-            // Set UI output fields
-            message.put("outputScopesAvailable", String.join(", ", scopePrefixes.keySet()));
-            message.put("outputScopesMapped", String.join(", ", scopePrefixes.values()));
-            message.put("outputScopesPrefixes", String.join(", ", scopePrefixes.keySet()));
-            message.put("outputScopesCount", scopePrefixes.size());
-            message.put("outputScopesInputProcessed", processedScopes);
-            message.put("outputScopesInputMapped", mappedScopes);
-            message.put("outputCacheHit", false);
-            message.put("outputLastUpdated", java.time.Instant.now().toString());
-
             Trace.info("Descoberta de scopes concluída com sucesso");
             return true;
 
