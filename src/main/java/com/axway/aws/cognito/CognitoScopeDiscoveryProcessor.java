@@ -228,26 +228,23 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
 
             Trace.info("Client encontrado: " + client.getClientName());
 
-            ListResourceServersRequest serversRequest = new ListResourceServersRequest()
-                    .withUserPoolId(userPoolId);
-
-            ListResourceServersResult serversResult = cognitoClient.listResourceServers(serversRequest);
-            List<ResourceServerType> resourceServers = serversResult.getResourceServers();
-
+            // O Client pode ter acesso a múltiplos Resource Servers
+            // Precisamos descobrir quais Resource Servers este Client específico tem acesso
             if (client.getAllowedOAuthScopes() != null) {
                 for (String scope : client.getAllowedOAuthScopes()) {
-                    String prefix = findResourceServerPrefix(scope, resourceServers);
+                    // Para cada scope, descobrir qual Resource Server o Client tem acesso
+                    String prefix = findResourceServerForClientScope(userPoolId, clientId, scope);
                     if (prefix != null) {
                         scopePrefixes.put(scope, prefix + "/" + scope);
-                        Trace.info("Scope mapeado: " + scope + " -> " + prefix + "/" + scope);
+                        Trace.info("Scope mapeado para Client " + clientId + ": " + scope + " -> " + prefix + "/" + scope);
                     } else {
                         scopePrefixes.put(scope, scope);
-                        Trace.info("Scope sem prefixo: " + scope);
+                        Trace.info("Scope sem prefixo para Client " + clientId + ": " + scope);
                     }
                 }
             }
 
-            Trace.info("Total de scopes descobertos: " + scopePrefixes.size());
+            Trace.info("Total de scopes descobertos para Client " + clientId + ": " + scopePrefixes.size());
 
         } catch (Exception e) {
             Trace.error("Erro ao descobrir scopes: " + e.getMessage());
@@ -258,19 +255,52 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     }
 
     /**
-     * Encontra o prefixo do resource server para um scope
+     * Descobre qual Resource Server um Client específico tem acesso para um scope
      */
-    private String findResourceServerPrefix(String scope, List<ResourceServerType> resourceServers) {
-        for (ResourceServerType server : resourceServers) {
-            if (server.getScopes() != null) {
-                for (ResourceServerScopeType serverScope : server.getScopes()) {
-                    if (scope.equals(serverScope.getScopeName())) {
-                        return server.getIdentifier();
+    private String findResourceServerForClientScope(String userPoolId, String clientId, String scope) {
+        try {
+            // Listar todos os Resource Servers do User Pool
+            ListResourceServersRequest serversRequest = new ListResourceServersRequest()
+                    .withUserPoolId(userPoolId);
+
+            ListResourceServersResult serversResult = cognitoClient.listResourceServers(serversRequest);
+            List<ResourceServerType> resourceServers = serversResult.getResourceServers();
+
+            if (resourceServers == null || resourceServers.isEmpty()) {
+                Trace.info("Nenhum Resource Server encontrado no User Pool: " + userPoolId);
+                return null;
+            }
+
+            Trace.info("Encontrados " + resourceServers.size() + " Resource Servers no User Pool: " + userPoolId);
+
+            // Para cada Resource Server, verificar se o Client tem acesso
+            for (ResourceServerType server : resourceServers) {
+                String serverIdentifier = server.getIdentifier();
+                Trace.info("Verificando Resource Server: " + serverIdentifier);
+
+                // Verificar se o Resource Server tem o scope
+                if (server.getScopes() != null) {
+                    for (ResourceServerScopeType serverScope : server.getScopes()) {
+                        if (scope.equals(serverScope.getScopeName())) {
+                            Trace.info("Scope '" + scope + "' encontrado no Resource Server: " + serverIdentifier);
+                            
+                            // TODO: Aqui deveríamos verificar se o Client tem acesso a este Resource Server
+                            // Por enquanto, assumimos que se o scope está no Resource Server, o Client tem acesso
+                            // Em uma implementação mais robusta, precisaríamos verificar as permissões do Client
+                            
+                            return serverIdentifier;
+                        }
                     }
                 }
             }
+
+            Trace.info("Scope '" + scope + "' não encontrado em nenhum Resource Server para Client: " + clientId);
+            return null;
+
+        } catch (Exception e) {
+            Trace.error("Erro ao descobrir Resource Server para scope '" + scope + "': " + e.getMessage());
+            return null;
         }
-        return null;
     }
 
     /**
