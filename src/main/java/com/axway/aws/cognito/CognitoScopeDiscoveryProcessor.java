@@ -372,13 +372,26 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             if (client.getAllowedOAuthScopes() != null) {
                 for (String scope : client.getAllowedOAuthScopes()) {
                     // Para cada scope, descobrir qual Resource Server o Client tem acesso
-                    String prefix = findResourceServerForClientScope(userPoolId, clientId, scope);
-                    if (prefix != null) {
-                        scopePrefixes.put(scope, prefix + "/" + scope);
-                        Trace.info("Scope mapeado para Client " + clientId + ": " + scope + " -> " + prefix + "/" + scope);
+                    if (scope.contains("/")) {
+                        // Scope já está no formato completo (resource-server/scope-name)
+                        String[] parts = scope.split("/", 2);
+                        if (parts.length == 2) {
+                            String resourceServerIdentifier = parts[0];
+                            String scopeName = parts[1];
+                            // Mapear o scope simples para o scope completo
+                            scopePrefixes.put(scopeName, scope);
+                            Trace.info("Scope completo mapeado para Client " + clientId + ": " + scopeName + " -> " + scope);
+                        }
                     } else {
-                        scopePrefixes.put(scope, scope);
-                        Trace.info("Scope sem prefixo para Client " + clientId + ": " + scope);
+                        // Scope simples, descobrir qual Resource Server contém este scope
+                        String prefix = findResourceServerForClientScope(userPoolId, clientId, scope);
+                        if (prefix != null) {
+                            scopePrefixes.put(scope, prefix + "/" + scope);
+                            Trace.info("Scope mapeado para Client " + clientId + ": " + scope + " -> " + prefix + "/" + scope);
+                        } else {
+                            scopePrefixes.put(scope, scope);
+                            Trace.info("Scope sem prefixo para Client " + clientId + ": " + scope);
+                        }
                     }
                 }
             }
