@@ -35,6 +35,7 @@ import com.vordel.es.Entity;
 import com.vordel.es.EntityStoreException;
 import com.vordel.trace.Trace;
 
+
 /**
  * Processador para descoberta dinâmica de scopes do AWS Cognito
  * 
@@ -167,7 +168,7 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
      */
     private void initializeCognitoClient() {
         try {
-            ClientConfiguration clientConfig = new ClientConfiguration();
+            ClientConfiguration clientConfig = createClientConfiguration(ctx, entity);
             AWSCredentialsProvider credentialsProvider = createCredentialsProvider(ctx, entity);
             String region = getRegion();
 
@@ -216,7 +217,7 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             if (filePath != null && !filePath.trim().isEmpty()) {
                 try {
                     Trace.info("Using AWS credentials file: " + filePath);
-                    // Create ProfileCredentialsProvider with file path and default profile
+                    // Create ProfileCredentialsProvider with file path and default profile (exactly like Lambda)
                     return new PropertiesFileCredentialsProvider(filePath);
                 } catch (Exception e) {
                     Trace.error("Error loading credentials file: " + e.getMessage());
@@ -228,7 +229,7 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                 return new DefaultAWSCredentialsProviderChain();
             }
         } else {
-            // Use explicit credentials via AWSFactory (following Lambda pattern)
+            // Use explicit credentials via AWSFactory (following Lambda pattern exactly)
             Trace.info("Using explicit AWS credentials via AWSFactory");
             try {
                 AWSCredentials awsCredentials = AWSFactory.getCredentials(ctx, entity);
@@ -239,6 +240,90 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                 Trace.info("Falling back to DefaultAWSCredentialsProviderChain");
                 return new DefaultAWSCredentialsProviderChain();
             }
+        }
+    }
+    
+    /**
+     * Creates ClientConfiguration from entity (following Lambda pattern exactly)
+     */
+    private ClientConfiguration createClientConfiguration(ConfigContext ctx, Entity entity) throws Exception {
+        ClientConfiguration clientConfig = new ClientConfiguration();
+        
+        if (entity == null) {
+            Trace.debug("using empty default ClientConfiguration");
+            return clientConfig;
+        }
+        
+        // Apply configuration settings with optimized single access (exactly like Lambda)
+        setIntegerConfig(clientConfig, entity, "connectionTimeout", (config, value) -> config.setConnectionTimeout(value));
+        setIntegerConfig(clientConfig, entity, "maxConnections", (config, value) -> config.setMaxConnections(value));
+        setIntegerConfig(clientConfig, entity, "maxErrorRetry", (config, value) -> config.setMaxErrorRetry(value));
+        setStringConfig(clientConfig, entity, "protocol", (config, value) -> {
+            try {
+                config.setProtocol(Protocol.valueOf(value));
+            } catch (IllegalArgumentException e) {
+                Trace.error("Invalid protocol value: " + value);
+            }
+        });
+        setIntegerConfig(clientConfig, entity, "socketTimeout", (config, value) -> config.setSocketTimeout(value));
+        setStringConfig(clientConfig, entity, "userAgent", (config, value) -> config.setUserAgent(value));
+        setStringConfig(clientConfig, entity, "proxyHost", (config, value) -> config.setProxyHost(value));
+        setIntegerConfig(clientConfig, entity, "proxyPort", (config, value) -> config.setProxyPort(value));
+        setStringConfig(clientConfig, entity, "proxyUsername", (config, value) -> config.setProxyUsername(value));
+        setEncryptedConfig(clientConfig, ctx, entity, "proxyPassword");
+        setStringConfig(clientConfig, entity, "proxyDomain", (config, value) -> config.setProxyDomain(value));
+        setStringConfig(clientConfig, entity, "proxyWorkstation", (config, value) -> config.setProxyWorkstation(value));
+        
+        // Handle socket buffer size hints (both must exist) - exactly like Lambda
+        try {
+            Integer sendHint = entity.getIntegerValue("socketSendBufferSizeHint");
+            Integer receiveHint = entity.getIntegerValue("socketReceiveBufferSizeHint");
+            if (sendHint != null && receiveHint != null) {
+                clientConfig.setSocketBufferSizeHints(sendHint, receiveHint);
+            }
+        } catch (Exception e) {
+            // Both fields don't exist, skip silently
+        }
+        
+        return clientConfig;
+    }
+    
+    /**
+     * Helper methods for ClientConfiguration (exactly like Lambda)
+     */
+    private void setIntegerConfig(ClientConfiguration config, Entity entity, String fieldName, java.util.function.BiConsumer<ClientConfiguration, Integer> setter) {
+        try {
+            Integer value = entity.getIntegerValue(fieldName);
+            if (value != null) {
+                setter.accept(config, value);
+            }
+        } catch (Exception e) {
+            // Field doesn't exist, skip silently
+        }
+    }
+    
+    private void setStringConfig(ClientConfiguration config, Entity entity, String fieldName, java.util.function.BiConsumer<ClientConfiguration, String> setter) {
+        try {
+            String value = entity.getStringValue(fieldName);
+            if (value != null && !value.trim().isEmpty()) {
+                setter.accept(config, value);
+            }
+        } catch (Exception e) {
+            // Field doesn't exist, skip silently
+        }
+    }
+    
+    private void setEncryptedConfig(ClientConfiguration config, ConfigContext ctx, Entity entity, String fieldName) {
+        try {
+            byte[] encryptedValue = entity.getEncryptedValue(fieldName);
+            if (encryptedValue != null && encryptedValue.length > 0) {
+                String value = new String(encryptedValue);
+                if (!value.trim().isEmpty()) {
+                    config.setProxyPassword(value);
+                }
+            }
+        } catch (Exception e) {
+            // Field doesn't exist, skip silently
         }
     }
     
