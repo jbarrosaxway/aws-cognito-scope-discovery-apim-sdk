@@ -256,10 +256,41 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
 
     /**
      * Descobre qual Resource Server um Client específico tem acesso para um scope
+     * 
+     * IMPORTANTE: A AWS Cognito retorna os scopes no formato: {resource-server-identifier}/{scope-name}
+     * Por exemplo: "solar-system-data/sunproximity.read" onde:
+     * - "solar-system-data" é o Resource Server Identifier
+     * - "sunproximity.read" é o Scope Name
      */
     private String findResourceServerForClientScope(String userPoolId, String clientId, String scope) {
         try {
-            // Listar todos os Resource Servers do User Pool
+            // Se o scope já contém o formato completo (resource-server/scope-name)
+            if (scope.contains("/")) {
+                String[] parts = scope.split("/", 2);
+                if (parts.length == 2) {
+                    String resourceServerIdentifier = parts[0];
+                    String scopeName = parts[1];
+                    Trace.info("Scope já está no formato completo: " + scope + 
+                              " (Resource Server: " + resourceServerIdentifier + ", Scope: " + scopeName + ")");
+                    return resourceServerIdentifier;
+                }
+            }
+
+            // Se chegou aqui, o scope está no formato simples (apenas scope-name)
+            // Precisamos descobrir qual Resource Server contém este scope
+            return findResourceServerBySimpleScope(userPoolId, scope);
+
+        } catch (Exception e) {
+            Trace.error("Erro ao descobrir Resource Server para scope '" + scope + "': " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Encontra o Resource Server que contém um scope simples (sem prefixo)
+     */
+    private String findResourceServerBySimpleScope(String userPoolId, String simpleScope) {
+        try {
             ListResourceServersRequest serversRequest = new ListResourceServersRequest()
                     .withUserPoolId(userPoolId);
 
@@ -271,109 +302,32 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                 return null;
             }
 
-            Trace.info("Encontrados " + resourceServers.size() + " Resource Servers no User Pool: " + userPoolId);
+            Trace.info("Procurando scope simples '" + simpleScope + "' em " + resourceServers.size() + " Resource Servers");
 
-            // Estratégia 1: Verificar se há apenas um Resource Server (caso mais comum)
-            if (resourceServers.size() == 1) {
-                ResourceServerType server = resourceServers.get(0);
+            // Procurar o scope em todos os Resource Servers
+            for (ResourceServerType server : resourceServers) {
                 String serverIdentifier = server.getIdentifier();
-                Trace.info("Apenas um Resource Server encontrado: " + serverIdentifier + " - usando como padrão");
                 
-                if (hasScope(server, scope)) {
-                    return serverIdentifier;
+                if (server.getScopes() != null) {
+                    for (ResourceServerScopeType serverScope : server.getScopes()) {
+                        if (simpleScope.equals(serverScope.getScopeName())) {
+                            Trace.info("Scope '" + simpleScope + "' encontrado no Resource Server: " + serverIdentifier);
+                            return serverIdentifier;
+                        }
+                    }
                 }
             }
 
-            // Estratégia 2: Verificar se o scope está em apenas um Resource Server
-            ResourceServerType targetServer = null;
-            int serversWithScope = 0;
-            
-            for (ResourceServerType server : resourceServers) {
-                if (hasScope(server, scope)) {
-                    targetServer = server;
-                    serversWithScope++;
-                }
-            }
-
-            if (serversWithScope == 1) {
-                String serverIdentifier = targetServer.getIdentifier();
-                Trace.info("Scope '" + scope + "' encontrado em apenas um Resource Server: " + serverIdentifier);
-                return serverIdentifier;
-            } else if (serversWithScope > 1) {
-                Trace.info("Scope '" + scope + "' encontrado em " + serversWithScope + " Resource Servers - usando o primeiro");
-                return targetServer.getIdentifier();
-            }
-
-            // Estratégia 3: Verificar se o Client tem alguma configuração específica
-            // Por exemplo, verificar se o nome do Client ou alguma propriedade indica o Resource Server
-            String inferredServer = inferResourceServerFromClient(clientId, resourceServers);
-            if (inferredServer != null) {
-                Trace.info("Resource Server inferido do Client '" + clientId + "': " + inferredServer);
-                return inferredServer;
-            }
-
-            // Estratégia 4: Fallback - usar o primeiro Resource Server que contém o scope
-            for (ResourceServerType server : resourceServers) {
-                if (hasScope(server, scope)) {
-                    String serverIdentifier = server.getIdentifier();
-                    Trace.info("Usando fallback - Resource Server: " + serverIdentifier + " para scope: " + scope);
-                    return serverIdentifier;
-                }
-            }
-
-            Trace.info("Scope '" + scope + "' não encontrado em nenhum Resource Server para Client: " + clientId);
+            Trace.info("Scope simples '" + simpleScope + "' não encontrado em nenhum Resource Server");
             return null;
 
         } catch (Exception e) {
-            Trace.error("Erro ao descobrir Resource Server para scope '" + scope + "': " + e.getMessage());
+            Trace.error("Erro ao buscar Resource Server para scope simples '" + simpleScope + "': " + e.getMessage());
             return null;
         }
     }
 
-    /**
-     * Verifica se um Resource Server tem um scope específico
-     */
-    private boolean hasScope(ResourceServerType server, String scope) {
-        if (server.getScopes() != null) {
-            for (ResourceServerScopeType serverScope : server.getScopes()) {
-                if (scope.equals(serverScope.getScopeName())) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
 
-    /**
-     * Tenta inferir o Resource Server baseado no ID do Client
-     * Esta é uma heurística baseada em convenções comuns de nomenclatura
-     */
-    private String inferResourceServerFromClient(String clientId, List<ResourceServerType> resourceServers) {
-        // Estratégia 1: Verificar se o Client ID contém parte do nome do Resource Server
-        for (ResourceServerType server : resourceServers) {
-            String serverIdentifier = server.getIdentifier();
-            
-            // Verificar se o Client ID contém o nome do Resource Server
-            if (clientId.toLowerCase().contains(serverIdentifier.toLowerCase()) ||
-                serverIdentifier.toLowerCase().contains(clientId.toLowerCase())) {
-                Trace.info("Correlação encontrada: Client '" + clientId + "' -> Resource Server '" + serverIdentifier + "'");
-                return serverIdentifier;
-            }
-        }
-
-        // Estratégia 2: Verificar se há apenas um Resource Server com nome genérico
-        for (ResourceServerType server : resourceServers) {
-            String serverIdentifier = server.getIdentifier();
-            if (serverIdentifier.contains("default") || 
-                serverIdentifier.contains("api") || 
-                serverIdentifier.contains("resource")) {
-                Trace.info("Usando Resource Server genérico: " + serverIdentifier);
-                return serverIdentifier;
-            }
-        }
-
-        return null;
-    }
 
     /**
      * Processa scopes de entrada
