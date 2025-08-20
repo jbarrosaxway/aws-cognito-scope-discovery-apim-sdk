@@ -14,6 +14,7 @@ import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
 import com.amazonaws.auth.PropertiesFileCredentialsProvider;
 import com.amazonaws.auth.WebIdentityTokenCredentialsProvider;
+import com.vordel.circuit.aws.AWSFactory;
 import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProvider;
 import com.amazonaws.services.cognitoidp.AWSCognitoIdentityProviderClientBuilder;
 import com.amazonaws.services.cognitoidp.model.DescribeUserPoolClientRequest;
@@ -56,6 +57,10 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     // Cliente Cognito
     private AWSCognitoIdentityProvider cognitoClient;
     
+    // Context and Entity for credentials
+    private ConfigContext ctx;
+    private Entity entity;
+    
     // Cache para scopes descobertos (userPoolId + clientId -> CacheEntry)
     private static final Map<String, CacheEntry> scopeCache = new ConcurrentHashMap<>();
     private static final long CACHE_EXPIRATION_MS = 30 * 60 * 1000; // 30 minutos
@@ -81,6 +86,10 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     @Override
     public void filterAttached(ConfigContext ctx, Entity entity) throws EntityStoreException {
         super.filterAttached(ctx, entity);
+        
+        // Store context and entity for credentials
+        this.ctx = ctx;
+        this.entity = entity;
         
         // Initialize selectors for all fields (following Lambda pattern)
         this.userPoolId = new Selector(entity.getStringValue("userPoolId"), String.class);
@@ -159,7 +168,7 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     private void initializeCognitoClient() {
         try {
             ClientConfiguration clientConfig = new ClientConfiguration();
-            AWSCredentialsProvider credentialsProvider = createCredentialsProvider();
+            AWSCredentialsProvider credentialsProvider = createCredentialsProvider(ctx, entity);
             String region = getRegion();
 
             this.cognitoClient = AWSCognitoIdentityProviderClientBuilder.standard()
@@ -177,27 +186,72 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     }
 
     /**
-     * Cria o provider de credenciais AWS
+     * Creates AWSCredentialsProvider (following Lambda pattern exactly)
      */
-    private AWSCredentialsProvider createCredentialsProvider() throws Exception {
+    private AWSCredentialsProvider createCredentialsProvider(ConfigContext ctx, Entity entity) throws Exception {
         String credentialTypeValue = credentialType.substitute(null);
         
-        if ("iam".equalsIgnoreCase(credentialTypeValue)) {
+        Trace.info("=== Credentials Provider Debug ===");
+        Trace.info("Credential Type Value: " + credentialTypeValue);
+        
+        if ("iam".equals(credentialTypeValue)) {
+            // Use IAM Role - WebIdentityTokenCredentialsProvider only
             Trace.info("Using IAM Role credentials - WebIdentityTokenCredentialsProvider");
+            
+            // Debug IRSA configuration
+            Trace.info("=== IRSA Debug ===");
+            Trace.info("AWS_WEB_IDENTITY_TOKEN_FILE: " + System.getenv("AWS_WEB_IDENTITY_TOKEN_FILE"));
+            Trace.info("AWS_ROLE_ARN: " + System.getenv("AWS_ROLE_ARN"));
+            Trace.info("AWS_REGION: " + System.getenv("AWS_REGION"));
+            
+            // Use WebIdentityTokenCredentialsProvider for IAM role
+            Trace.info("✅ Using WebIdentityTokenCredentialsProvider for IAM role");
             return new WebIdentityTokenCredentialsProvider();
-        } else if ("file".equalsIgnoreCase(credentialTypeValue)) {
-            String credentialsFilePathValue = credentialsFilePath.substitute(null);
-            if (credentialsFilePathValue == null || credentialsFilePathValue.trim().isEmpty()) {
-                throw new IllegalArgumentException("credentialsFilePath é obrigatório quando credentialType é 'file'");
+        } else if ("file".equals(credentialTypeValue)) {
+            // Use credentials file
+            Trace.info("Credentials Type is 'file', checking credentialsFilePath...");
+            String filePath = credentialsFilePath.substitute(null);
+            Trace.info("File Path: " + filePath);
+            
+            if (filePath != null && !filePath.trim().isEmpty()) {
+                try {
+                    Trace.info("Using AWS credentials file: " + filePath);
+                    // Create ProfileCredentialsProvider with file path and default profile
+                    return new PropertiesFileCredentialsProvider(filePath);
+                } catch (Exception e) {
+                    Trace.error("Error loading credentials file: " + e.getMessage());
+                    Trace.info("Falling back to DefaultAWSCredentialsProviderChain");
+                    return new DefaultAWSCredentialsProviderChain();
+                }
+            } else {
+                Trace.info("Credentials file path not specified, using DefaultAWSCredentialsProviderChain");
+                return new DefaultAWSCredentialsProviderChain();
             }
-            Trace.info("Using AWS credentials file: " + credentialsFilePathValue);
-            return new PropertiesFileCredentialsProvider(credentialsFilePathValue);
-        } else if ("local".equalsIgnoreCase(credentialTypeValue)) {
-            Trace.info("Using local AWS credentials");
-            return new DefaultAWSCredentialsProviderChain();
         } else {
-            throw new IllegalArgumentException("Tipo de credencial inválido: " + credentialTypeValue);
+            // Use explicit credentials via AWSFactory (following Lambda pattern)
+            Trace.info("Using explicit AWS credentials via AWSFactory");
+            try {
+                AWSCredentials awsCredentials = AWSFactory.getCredentials(ctx, entity);
+                Trace.info("AWSFactory.getCredentials() successful");
+                return getAWSCredentialsProvider(awsCredentials);
+            } catch (Exception e) {
+                Trace.error("Error getting explicit credentials: " + e.getMessage());
+                Trace.info("Falling back to DefaultAWSCredentialsProviderChain");
+                return new DefaultAWSCredentialsProviderChain();
+            }
         }
+    }
+    
+    /**
+     * Creates AWSCredentialsProvider (following Lambda pattern)
+     */
+    private AWSCredentialsProvider getAWSCredentialsProvider(final AWSCredentials awsCredentials) {
+        return new AWSCredentialsProvider() {
+            public AWSCredentials getCredentials() {
+                return awsCredentials;
+            }
+            public void refresh() {}
+        };
     }
 
     private String getRegion() {
