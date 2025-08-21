@@ -8,8 +8,8 @@ which discovers AWS Cognito scopes from User Pool and maps them to Resource Serv
 		<field name="clientId" type="string" cardinality="1" />
 		<field name="awsRegion" type="string" cardinality="1" />
 		<field name="credentialType" type="string" cardinality="1" />
-		<field name="awsCredential" type="^ApiKeyProfile" cardinality="1" />
-		<field name="clientConfiguration" type="^AWSClientConfiguration" cardinality="1" />
+		<field name="awsCredential" type="string" cardinality="1" />
+		<field name="clientConfiguration" type="string" cardinality="1" />
 		<field name="credentialsFilePath" type="string" cardinality="1" />
 		<field name="scopesInput" type="string" cardinality="1" />
 	</entityType>
