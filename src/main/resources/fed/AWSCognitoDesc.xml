@@ -6,10 +6,10 @@ which discovers AWS Cognito scopes from User Pool and maps them to Resource Serv
 		<constant name="class" type="string" value="com.axway.aws.cognito.CognitoScopeDiscoveryFilter" />
 		<field name="userPoolId" type="string" cardinality="1" />
 		<field name="clientId" type="string" cardinality="1" />
-		<field name="awsRegion" type="string" cardinality="1" />
+		<field name="awsRegion" type="string" cardinality="1" default="us-east-1" />
 		<field name="credentialType" type="string" cardinality="1" />
-		<field name="awsCredential" type="string" cardinality="1" />
-		<field name="clientConfiguration" type="string" cardinality="1" />
+		<field name="awsCredential" type="^ApiKeyProfile" cardinality="?" />
+		<field name="clientConfiguration" type="^AWSClientConfiguration" cardinality="?" />
 		<field name="credentialsFilePath" type="string" cardinality="1" />
 		<field name="scopesInput" type="string" cardinality="1" />
 	</entityType>
