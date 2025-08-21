@@ -1,11 +1,5 @@
 <!-- This type defines the filter configuration data for the Cognito Scope Discovery filter
-which discovers AWS Cognito scopes dynamically from Policy Studio "class" - The
-filter classname. "userPoolId" - The ID of the Cognito User Pool "clientId" - 
-The ID of the Cognito app client "awsRegion" - The AWS region where the Cognito 
-service is located "credentialType" - The type of AWS credentials to use
-"awsCredential" - Reference to AWS credentials profile "clientConfiguration" - 
-Reference to AWS client configuration "credentialsFilePath" - Path to AWS 
-credentials file "scopesInput" - Input scopes to process (comma-separated) -->
+which discovers AWS Cognito scopes from User Pool and maps them to Resource Servers -->
 
 <entityStoreData>
 	<entityType name="CognitoScopeDiscoveryFilter" extends="AWSFilter">
