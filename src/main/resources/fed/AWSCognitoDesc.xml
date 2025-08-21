@@ -26,6 +26,9 @@ which discovers AWS Cognito scopes from User Pool and maps them to Resource Serv
 		<fval name="credentialType">
 			<value>local</value>
 		</fval>
+		<fval name="clientConfiguration">
+			<value>/External Connections/(AWSSettings)Amazon Web Services Settings/(AWSClientConfiguration)Default AWS Client Configuration</value>
+		</fval>
 		<fval name="userPoolId">
 			<value></value>
 		</fval>
