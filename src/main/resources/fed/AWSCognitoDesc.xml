@@ -9,7 +9,16 @@ which discovers AWS Cognito scopes from User Pool and maps them to Resource Serv
 		<field name="awsRegion" type="string" cardinality="1" default="us-east-1" />
 		<field name="credentialType" type="string" cardinality="1" default="local" />
 		<field name="awsCredential" type="^ApiKeyProfile" cardinality="?" />
-		<field name="clientConfiguration" type="^AWSClientConfiguration" cardinality="?" default="/External Connections/(AWSSettings)Amazon Web Services Settings/(AWSClientConfiguration)Default AWS Client Configuration" />
+		<field name="clientConfiguration" type="^AWSClientConfiguration" cardinality="?">
+			<defaultRef>
+				<key type="AWSSettings">
+					<id field="name" value="Amazon Web Services Settings"/>
+					<key type="AWSClientConfiguration">
+						<id field="name" value="Default AWS Client Configuration"/>
+					</key>
+				</key>
+			</defaultRef>
+		</field>
 		<field name="credentialsFilePath" type="string" cardinality="1" default="" />
 		<field name="scopesInput" type="string" cardinality="1" default="" />
 	</entityType>
