@@ -45,15 +45,15 @@ import com.vordel.trace.Trace;
  */
 public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
 
-    // Selectors for dynamic field resolution (following Lambda pattern)
-    protected Selector<String> userPoolId;
-    protected Selector<String> clientId;
-    protected Selector<String> awsRegion;
-    protected Selector<String> credentialType;
-    protected Selector<String> awsCredential;
-    protected Selector<String> clientConfiguration;
-    protected Selector<String> credentialsFilePath;
-    protected Selector<String> scopesInput;
+    // Selectors for dynamic field resolution (following Lambda pattern) - Lazy initialization
+    private Selector<String> userPoolId;
+    private Selector<String> clientId;
+    private Selector<String> awsRegion;
+    private Selector<String> credentialType;
+    private Selector<String> awsCredential;
+    private Selector<String> clientConfiguration;
+    private Selector<String> credentialsFilePath;
+    private Selector<String> scopesInput;
 
     // Cliente Cognito
     private AWSCognitoIdentityProvider cognitoClient;
@@ -92,15 +92,7 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
         this.ctx = ctx;
         this.entity = entity;
         
-        // Initialize selectors for all fields (following Lambda pattern)
-        this.userPoolId = new Selector(entity.getStringValue("userPoolId"), String.class);
-        this.clientId = new Selector(entity.getStringValue("clientId"), String.class);
-        this.awsRegion = new Selector(entity.getStringValue("awsRegion"), String.class);
-        this.credentialType = new Selector(entity.getStringValue("credentialType"), String.class);
-        this.awsCredential = new Selector(entity.getStringValue("awsCredential"), String.class);
-        this.clientConfiguration = new Selector(entity.getStringValue("clientConfiguration"), String.class);
-        this.credentialsFilePath = new Selector(entity.getStringValue("credentialsFilePath") != null ? entity.getStringValue("credentialsFilePath") : "", String.class);
-        this.scopesInput = new Selector(entity.getStringValue("scopesInput") != null ? entity.getStringValue("scopesInput") : "", String.class);
+        // Selectors serão inicializados lazy quando necessário
         
         // Initialize Cognito client
         initializeCognitoClient();
@@ -109,10 +101,10 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     @Override
     public boolean invoke(Circuit circuit, Message message) throws CircuitAbortException {
         try {
-            // Get values from selectors
-            String userPoolIdValue = userPoolId.substitute(message);
-            String clientIdValue = clientId.substitute(message);
-            String scopesInputValue = scopesInput.substitute(message);
+                    // Get values from selectors using lazy initialization
+        String userPoolIdValue = getUserPoolId().substitute(message);
+        String clientIdValue = getClientId().substitute(message);
+        String scopesInputValue = getScopesInput().substitute(message);
             
             if (userPoolIdValue == null || userPoolIdValue.trim().isEmpty()) {
                 throw new IllegalArgumentException("userPoolId é obrigatório");
@@ -190,7 +182,7 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
      * Creates AWSCredentialsProvider (following Lambda pattern exactly)
      */
     private AWSCredentialsProvider createCredentialsProvider(ConfigContext ctx, Entity entity) throws Exception {
-        String credentialTypeValue = credentialType.substitute(null);
+        String credentialTypeValue = getCredentialType().substitute(null);
         
         Trace.info("=== Credentials Provider Debug ===");
         Trace.info("Credential Type Value: " + credentialTypeValue);
@@ -211,7 +203,7 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
         } else if ("file".equals(credentialTypeValue)) {
             // Use credentials file
             Trace.info("Credentials Type is 'file', checking credentialsFilePath...");
-            String filePath = credentialsFilePath.substitute(null);
+            String filePath = getCredentialsFilePath().substitute(null);
             Trace.info("File Path: " + filePath);
             
             if (filePath != null && !filePath.trim().isEmpty()) {
@@ -339,8 +331,65 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
         };
     }
 
+    // Lazy initialization getters for selectors
+    private Selector<String> getUserPoolId() {
+        if (userPoolId == null) {
+            userPoolId = new Selector(entity.getStringValue("userPoolId"), String.class);
+        }
+        return userPoolId;
+    }
+    
+    private Selector<String> getClientId() {
+        if (clientId == null) {
+            clientId = new Selector(entity.getStringValue("clientId"), String.class);
+        }
+        return clientId;
+    }
+    
+    private Selector<String> getAwsRegion() {
+        if (awsRegion == null) {
+            awsRegion = new Selector(entity.getStringValue("awsRegion"), String.class);
+        }
+        return awsRegion;
+    }
+    
+    private Selector<String> getCredentialType() {
+        if (credentialType == null) {
+            credentialType = new Selector(entity.getStringValue("credentialType"), String.class);
+        }
+        return credentialType;
+    }
+    
+    private Selector<String> getAwsCredential() {
+        if (awsCredential == null) {
+            awsCredential = new Selector(entity.getStringValue("awsCredential"), String.class);
+        }
+        return awsCredential;
+    }
+    
+    private Selector<String> getClientConfiguration() {
+        if (clientConfiguration == null) {
+            clientConfiguration = new Selector(entity.getStringValue("clientConfiguration"), String.class);
+        }
+        return clientConfiguration;
+    }
+    
+    private Selector<String> getCredentialsFilePath() {
+        if (credentialsFilePath == null) {
+            credentialsFilePath = new Selector(entity.getStringValue("credentialsFilePath") != null ? entity.getStringValue("credentialsFilePath") : "", String.class);
+        }
+        return credentialsFilePath;
+    }
+    
+    private Selector<String> getScopesInput() {
+        if (scopesInput == null) {
+            scopesInput = new Selector(entity.getStringValue("scopesInput") != null ? entity.getStringValue("scopesInput") : "", String.class);
+        }
+        return scopesInput;
+    }
+
     private String getRegion() {
-        String awsRegionValue = awsRegion.substitute(null);
+        String awsRegionValue = getAwsRegion().substitute(null);
         if (awsRegionValue != null && !awsRegionValue.trim().isEmpty()) {
             return awsRegionValue;
         }
@@ -369,31 +418,9 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
 
             // O Client pode ter acesso a múltiplos Resource Servers
             // Precisamos descobrir quais Resource Servers este Client específico tem acesso
-            if (client.getAllowedOAuthScopes() != null) {
-                for (String scope : client.getAllowedOAuthScopes()) {
-                    // Para cada scope, descobrir qual Resource Server o Client tem acesso
-                    if (scope.contains("/")) {
-                        // Scope já está no formato completo (resource-server/scope-name)
-                        String[] parts = scope.split("/", 2);
-                        if (parts.length == 2) {
-                            String resourceServerIdentifier = parts[0];
-                            String scopeName = parts[1];
-                            // Mapear o scope simples para o scope completo
-                            scopePrefixes.put(scopeName, scope);
-                            Trace.info("Scope completo mapeado para Client " + clientId + ": " + scopeName + " -> " + scope);
-                        }
-                    } else {
-                        // Scope simples, descobrir qual Resource Server contém este scope
-                        String prefix = findResourceServerForClientScope(userPoolId, clientId, scope);
-                        if (prefix != null) {
-                            scopePrefixes.put(scope, prefix + "/" + scope);
-                            Trace.info("Scope mapeado para Client " + clientId + ": " + scope + " -> " + prefix + "/" + scope);
-                        } else {
-                            scopePrefixes.put(scope, scope);
-                            Trace.info("Scope sem prefixo para Client " + clientId + ": " + scope);
-                        }
-                    }
-                }
+            List<String> allowedScopes = client.getAllowedOAuthScopes();
+            if (allowedScopes != null && !allowedScopes.isEmpty()) {
+                processScopesBatch(allowedScopes, userPoolId, clientId, scopePrefixes);
             }
 
             Trace.info("Total de scopes descobertos para Client " + clientId + ": " + scopePrefixes.size());
@@ -416,16 +443,14 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
      */
     private String findResourceServerForClientScope(String userPoolId, String clientId, String scope) {
         try {
-            // Se o scope já contém o formato completo (resource-server/scope-name)
-            if (scope.contains("/")) {
-                String[] parts = scope.split("/", 2);
-                if (parts.length == 2) {
-                    String resourceServerIdentifier = parts[0];
-                    String scopeName = parts[1];
-                    Trace.info("Scope já está no formato completo: " + scope + 
-                              " (Resource Server: " + resourceServerIdentifier + ", Scope: " + scopeName + ")");
-                    return resourceServerIdentifier;
-                }
+            // Otimização: usar indexOf em vez de split para melhor performance
+            int slashIndex = scope.indexOf('/');
+            if (slashIndex > 0) {
+                String resourceServerIdentifier = scope.substring(0, slashIndex);
+                String scopeName = scope.substring(slashIndex + 1);
+                Trace.info("Scope já está no formato completo: " + scope + 
+                          " (Resource Server: " + resourceServerIdentifier + ", Scope: " + scopeName + ")");
+                return resourceServerIdentifier;
             }
 
             // Se chegou aqui, o scope está no formato simples (apenas scope-name)
@@ -494,6 +519,34 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             scopes[i] = scopes[i].trim();
         }
         return String.join(", ", scopes);
+    }
+
+    /**
+     * Processa scopes em batch com otimizações de string
+     */
+    private void processScopesBatch(List<String> scopes, String userPoolId, String clientId, Map<String, String> scopePrefixes) {
+        for (String scope : scopes) {
+            // Otimização: usar indexOf em vez de split para melhor performance
+            int slashIndex = scope.indexOf('/');
+            if (slashIndex > 0) {
+                // Scope já está no formato completo (resource-server/scope-name)
+                String resourceServerIdentifier = scope.substring(0, slashIndex);
+                String scopeName = scope.substring(slashIndex + 1);
+                // Mapear o scope simples para o scope completo
+                scopePrefixes.put(scopeName, scope);
+                Trace.info("Scope completo mapeado para Client " + clientId + ": " + scopeName + " -> " + scope);
+            } else {
+                // Scope simples, descobrir qual Resource Server contém este scope
+                String prefix = findResourceServerForClientScope(userPoolId, clientId, scope);
+                if (prefix != null) {
+                    scopePrefixes.put(scope, prefix + "/" + scope);
+                    Trace.info("Scope mapeado para Client " + clientId + ": " + scope + " -> " + prefix + "/" + scope);
+                } else {
+                    scopePrefixes.put(scope, scope);
+                    Trace.info("Scope sem prefixo para Client " + clientId + ": " + scope);
+                }
+            }
+        }
     }
 
     /**
