@@ -94,17 +94,21 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
         
         // Selectors serão inicializados lazy quando necessário
         
-        // Initialize Cognito client
-        initializeCognitoClient();
+        // Initialize Cognito client (será inicializado com região padrão, reinicializado no invoke se necessário)
+        initializeCognitoClientWithDefaultRegion();
     }
 
     @Override
     public boolean invoke(Circuit circuit, Message message) throws CircuitAbortException {
         try {
-                    // Get values from selectors using lazy initialization
-        String userPoolIdValue = getUserPoolId().substitute(message);
-        String clientIdValue = getClientId().substitute(message);
-        String scopesInputValue = getScopesInput().substitute(message);
+            // Get values from selectors using lazy initialization
+            String userPoolIdValue = getUserPoolId().substitute(message);
+            String clientIdValue = getClientId().substitute(message);
+            String scopesInputValue = getScopesInput().substitute(message);
+            String regionValue = getRegion(message);
+            
+            // Log essencial apenas
+            Trace.info("Iniciando descoberta de scopes - userPoolId: " + userPoolIdValue + ", clientId: " + clientIdValue);
             
             if (userPoolIdValue == null || userPoolIdValue.trim().isEmpty()) {
                 throw new IllegalArgumentException("userPoolId é obrigatório");
@@ -114,8 +118,16 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                 throw new IllegalArgumentException("clientId é obrigatório");
             }
 
-            Trace.info("Iniciando descoberta de scopes do AWS Cognito");
-            Trace.info("userPoolId: " + userPoolIdValue + ", clientId: " + clientIdValue);
+            // Verificar se o cliente Cognito foi inicializado corretamente
+            if (cognitoClient == null) {
+                Trace.info("Reinicializando cliente Cognito com região: " + regionValue);
+                initializeCognitoClient(regionValue);
+                
+                // Verificar novamente após tentativa de reinicialização
+                if (cognitoClient == null) {
+                    throw new Exception("Não foi possível inicializar o cliente Cognito. Verifique as configurações de credenciais e região.");
+                }
+            }
 
             // Discover scopes from Cognito
             Map<String, String> scopePrefixes = discoverScopesFromCognito(userPoolIdValue, clientIdValue);
@@ -144,25 +156,105 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             message.put("cognito.scopes.cache_hit", false);
             message.put("cognito.scopes.last_updated", java.time.Instant.now().toString());
 
+            // Adicionar propriedades do userPoolId
+            String userPoolIdSlug = generateUserPoolIdSlug(userPoolIdValue);
+            message.put("cognito.user_pool_id.original", userPoolIdValue);
+            message.put("cognito.user_pool_id.slug", userPoolIdSlug);
+            message.put("cognito.user_pool_id.url", "https://" + userPoolIdSlug + ".auth." + regionValue + ".amazoncognito.com/oauth2/token");
+
             Trace.info("Descoberta de scopes concluída com sucesso");
             return true;
 
         } catch (Exception e) {
             Trace.error("Erro na descoberta de scopes: " + e.getMessage());
-            message.put("cognito.scopes.error", "scope_discovery_failed");
-            message.put("cognito.scopes.error_description", e.getMessage());
-            throw new CircuitAbortException("Erro na descoberta de scopes: " + e.getMessage(), e);
+            
+            // Verificar se é um erro de scope inválido
+            if (e.getMessage() != null && e.getMessage().startsWith("invalid_scope")) {
+                message.put("cognito.scopes.error", "invalid_scope");
+                message.put("cognito.scopes.error_description", e.getMessage());
+                Trace.error("Scope inválido detectado, retornando false: " + e.getMessage());
+                return false; // Retorna false ao invés de lançar exceção
+            } else {
+                // Outros erros continuam lançando exceção
+                message.put("cognito.scopes.error", "scope_discovery_failed");
+                message.put("cognito.scopes.error_description", e.getMessage());
+                throw new CircuitAbortException("Erro na descoberta de scopes: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * Inicializa o cliente Cognito com região padrão (usado no filterAttached)
+     */
+    private void initializeCognitoClientWithDefaultRegion() {
+        try {
+            Trace.info("⚙️ Tentando inicialização do cliente Cognito com região padrão...");
+            
+            // Tentar criar configurações de forma segura
+            ClientConfiguration clientConfig = createClientConfigurationSafe();
+            AWSCredentialsProvider credentialsProvider = createCredentialsProviderSafe();
+
+            if (credentialsProvider == null) {
+                Trace.info("⚠️ Não foi possível criar credenciais durante filterAttached (normal se usar expressões EL)");
+                Trace.info("⚠️ Cliente será inicializado durante o primeiro invoke");
+                this.cognitoClient = null;
+                return;
+            }
+
+            // Validar credenciais antes de prosseguir
+            try {
+                AWSCredentials testCredentials = credentialsProvider.getCredentials();
+                if (testCredentials == null) {
+                    throw new Exception("Credenciais AWS são null");
+                }
+                Trace.info("✅ Credenciais AWS validadas durante inicialização");
+            } catch (Exception credError) {
+                Trace.info("⚠️ Validação de credenciais falhou durante filterAttached: " + credError.getMessage());
+                Trace.info("⚠️ Cliente será inicializado durante o primeiro invoke");
+                this.cognitoClient = null;
+                return; // Não continua se não conseguir validar credenciais
+            }
+
+            this.cognitoClient = AWSCognitoIdentityProviderClientBuilder.standard()
+                    .withCredentials(credentialsProvider)
+                    .withRegion("us-east-1") // Região padrão
+                    .withClientConfiguration(clientConfig)
+                    .build();
+
+            Trace.info("✅ Cliente Cognito inicializado com região padrão durante filterAttached");
+
+        } catch (Exception e) {
+            String errorType = e.getClass().getSimpleName();
+            Trace.info("⚠️ Erro esperado durante filterAttached (" + errorType + "): " + e.getMessage());
+            Trace.info("⚠️ Cliente será inicializado durante o primeiro invoke com configurações completas");
+            
+            // Não logar como erro se for durante filterAttached - é esperado se houver EL expressions
+            this.cognitoClient = null; // Será reinicializado no invoke com a região correta
         }
     }
 
     /**
      * Inicializa o cliente Cognito
      */
-    private void initializeCognitoClient() {
+    private void initializeCognitoClient(String region) {
         try {
+            Trace.info("Inicializando cliente Cognito - Região: " + region);
+            
             ClientConfiguration clientConfig = createClientConfiguration(ctx, entity);
             AWSCredentialsProvider credentialsProvider = createCredentialsProvider(ctx, entity);
-            String region = getRegion();
+
+            // Tentar validar credenciais antes de criar o cliente
+            try {
+                AWSCredentials testCredentials = credentialsProvider.getCredentials();
+                if (testCredentials != null) {
+                    Trace.info("✅ Credenciais AWS obtidas com sucesso");
+                } else {
+                    Trace.error("❌ Credenciais AWS são null");
+                }
+            } catch (Exception credError) {
+                Trace.error("❌ Erro ao obter credenciais AWS: " + credError.getMessage());
+                throw new Exception("Falha na validação de credenciais: " + credError.getMessage(), credError);
+            }
 
             this.cognitoClient = AWSCognitoIdentityProviderClientBuilder.standard()
                     .withCredentials(credentialsProvider)
@@ -170,11 +262,30 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                     .withClientConfiguration(clientConfig)
                     .build();
 
-            Trace.info("Cliente Cognito inicializado com sucesso");
+            Trace.info("✅ Cliente Cognito inicializado com sucesso");
 
         } catch (Exception e) {
-            Trace.error("Erro ao inicializar cliente Cognito: " + e.getMessage());
+            String errorMsg = e.getMessage();
+            String errorType = e.getClass().getSimpleName();
+            
+            Trace.error("❌ Erro ao inicializar cliente Cognito (" + errorType + "): " + errorMsg);
+            
+            // Diagnóstico específico
+            if (errorMsg != null) {
+                if (errorMsg.contains("Unable to load credentials")) {
+                    Trace.error("💡 DIAGNÓSTICO: Problema com credenciais AWS. Verifique:");
+                    Trace.error("   - Se está usando IAM role: AWS_ROLE_ARN e AWS_WEB_IDENTITY_TOKEN_FILE");
+                    Trace.error("   - Se está usando arquivo: credentialsFilePath deve apontar para arquivo válido");
+                    Trace.error("   - Se está usando credenciais explícitas: awsCredential deve estar configurado");
+                } else if (errorMsg.contains("region")) {
+                    Trace.error("💡 DIAGNÓSTICO: Problema com região AWS. Verifique se '" + region + "' é uma região válida");
+                } else if (errorMsg.contains("NoClassDefFoundError") || errorMsg.contains("ClassNotFoundException")) {
+                    Trace.error("💡 DIAGNÓSTICO: Problema de dependência. Verifique se o AWS SDK está no classpath");
+                }
+            }
+            
             e.printStackTrace();
+            this.cognitoClient = null;
         }
     }
 
@@ -182,54 +293,69 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
      * Creates AWSCredentialsProvider (following Lambda pattern exactly)
      */
     private AWSCredentialsProvider createCredentialsProvider(ConfigContext ctx, Entity entity) throws Exception {
-        String credentialTypeValue = getCredentialType().substitute(null);
+        String credentialTypeValue = getCredentialTypeSafe();
         
-        Trace.info("=== Credentials Provider Debug ===");
-        Trace.info("Credential Type Value: " + credentialTypeValue);
+        Trace.info("🔑 Configurando credenciais AWS - Tipo: " + credentialTypeValue);
         
         if ("iam".equals(credentialTypeValue)) {
             // Use IAM Role - WebIdentityTokenCredentialsProvider only
-            Trace.info("Using IAM Role credentials - WebIdentityTokenCredentialsProvider");
+            Trace.info("🔑 Usando IAM Role (IRSA)");
             
-            // Debug IRSA configuration
-            Trace.info("=== IRSA Debug ===");
-            Trace.info("AWS_WEB_IDENTITY_TOKEN_FILE: " + System.getenv("AWS_WEB_IDENTITY_TOKEN_FILE"));
-            Trace.info("AWS_ROLE_ARN: " + System.getenv("AWS_ROLE_ARN"));
-            Trace.info("AWS_REGION: " + System.getenv("AWS_REGION"));
+            // Debug das variáveis de ambiente
+            String tokenFile = System.getenv("AWS_WEB_IDENTITY_TOKEN_FILE");
+            String roleArn = System.getenv("AWS_ROLE_ARN");
+            String awsRegion = System.getenv("AWS_REGION");
             
-            // Use WebIdentityTokenCredentialsProvider for IAM role
-            Trace.info("✅ Using WebIdentityTokenCredentialsProvider for IAM role");
+            Trace.info("🔍 AWS_WEB_IDENTITY_TOKEN_FILE: " + (tokenFile != null ? "✅ Configurado" : "❌ Não configurado"));
+            Trace.info("🔍 AWS_ROLE_ARN: " + (roleArn != null ? "✅ Configurado" : "❌ Não configurado"));
+            Trace.info("🔍 AWS_REGION: " + (awsRegion != null ? awsRegion : "❌ Não configurado"));
+            
+            if (tokenFile == null || roleArn == null) {
+                throw new Exception("IAM Role mal configurado. Necessário: AWS_WEB_IDENTITY_TOKEN_FILE e AWS_ROLE_ARN");
+            }
+            
             return new WebIdentityTokenCredentialsProvider();
+            
         } else if ("file".equals(credentialTypeValue)) {
             // Use credentials file
-            Trace.info("Credentials Type is 'file', checking credentialsFilePath...");
-            String filePath = getCredentialsFilePath().substitute(null);
-            Trace.info("File Path: " + filePath);
+            String filePath = getCredentialsFilePathSafe();
+            
+            Trace.info("🔑 Usando arquivo de credenciais: " + filePath);
             
             if (filePath != null && !filePath.trim().isEmpty()) {
                 try {
-                    Trace.info("Using AWS credentials file: " + filePath);
-                    // Create ProfileCredentialsProvider with file path and default profile (exactly like Lambda)
+                    java.io.File credFile = new java.io.File(filePath);
+                    if (!credFile.exists()) {
+                        throw new Exception("Arquivo de credenciais não encontrado: " + filePath);
+                    }
+                    if (!credFile.canRead()) {
+                        throw new Exception("Arquivo de credenciais não pode ser lido: " + filePath);
+                    }
+                    
+                    Trace.info("✅ Arquivo de credenciais válido: " + filePath);
                     return new PropertiesFileCredentialsProvider(filePath);
                 } catch (Exception e) {
-                    Trace.error("Error loading credentials file: " + e.getMessage());
-                    Trace.info("Falling back to DefaultAWSCredentialsProviderChain");
+                    Trace.error("❌ Erro ao carregar arquivo de credenciais: " + e.getMessage());
+                    Trace.info("🔄 Usando DefaultAWSCredentialsProviderChain como fallback");
                     return new DefaultAWSCredentialsProviderChain();
                 }
             } else {
-                Trace.info("Credentials file path not specified, using DefaultAWSCredentialsProviderChain");
+                Trace.info("🔄 Caminho do arquivo não especificado, usando DefaultAWSCredentialsProviderChain");
                 return new DefaultAWSCredentialsProviderChain();
             }
         } else {
             // Use explicit credentials via AWSFactory (following Lambda pattern exactly)
-            Trace.info("Using explicit AWS credentials via AWSFactory");
+            Trace.info("🔑 Usando credenciais explícitas via AWSFactory");
             try {
                 AWSCredentials awsCredentials = AWSFactory.getCredentials(ctx, entity);
-                Trace.info("AWSFactory.getCredentials() successful");
+                if (awsCredentials == null) {
+                    throw new Exception("AWSFactory.getCredentials() retornou null");
+                }
+                Trace.info("✅ Credenciais explícitas obtidas com sucesso");
                 return getAWSCredentialsProvider(awsCredentials);
             } catch (Exception e) {
-                Trace.error("Error getting explicit credentials: " + e.getMessage());
-                Trace.info("Falling back to DefaultAWSCredentialsProviderChain");
+                Trace.error("❌ Erro ao obter credenciais explícitas: " + e.getMessage());
+                Trace.info("🔄 Usando DefaultAWSCredentialsProviderChain como fallback");
                 return new DefaultAWSCredentialsProviderChain();
             }
         }
@@ -388,21 +514,98 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
         return scopesInput;
     }
 
-    private String getRegion() {
-        String awsRegionValue = getAwsRegion().substitute(null);
-        if (awsRegionValue != null && !awsRegionValue.trim().isEmpty()) {
-            return awsRegionValue;
+    // Métodos "safe" para uso durante filterAttached (sem contexto de Message)
+    private String getCredentialTypeSafe() {
+        try {
+            String rawValue = entity.getStringValue("credentialType");
+            if (rawValue != null && !rawValue.contains("${")) {
+                // Valor literal, sem EL
+                return rawValue;
+            }
+            // Se contém EL, usar valor padrão
+            return "iam"; // Default padrão
+        } catch (Exception e) {
+            Trace.error("Erro ao obter credentialType: " + e.getMessage());
+            return "iam"; // Default padrão
         }
-        return "us-east-1"; // Default
+    }
+    
+    private String getCredentialsFilePathSafe() {
+        try {
+            String rawValue = entity.getStringValue("credentialsFilePath");
+            if (rawValue != null && !rawValue.contains("${")) {
+                // Valor literal, sem EL
+                return rawValue;
+            }
+            // Se contém EL, retornar vazio
+            return "";
+        } catch (Exception e) {
+            Trace.error("Erro ao obter credentialsFilePath: " + e.getMessage());
+            return "";
+        }
+    }
+
+    private AWSCredentialsProvider createCredentialsProviderSafe() {
+        try {
+            return createCredentialsProvider(ctx, entity);
+        } catch (Exception e) {
+            Trace.info("⚠️ Não foi possível criar CredentialsProvider durante filterAttached: " + e.getMessage());
+            return null; // Será criado durante invoke
+        }
+    }
+
+    private ClientConfiguration createClientConfigurationSafe() {
+        try {
+            return createClientConfiguration(ctx, entity);
+        } catch (Exception e) {
+            Trace.info("⚠️ Erro ao criar ClientConfiguration, usando padrão: " + e.getMessage());
+            return new ClientConfiguration(); // Configuração padrão
+        }
+    }
+
+    private String getRegion(Message message) {
+        try {
+            Selector<String> awsRegionSelector = getAwsRegion();
+            
+            if (awsRegionSelector == null) {
+                Trace.info("Selector awsRegion não configurado, usando região padrão: us-east-1");
+                return "us-east-1";
+            }
+            
+            String awsRegionValue = awsRegionSelector.substitute(message);
+            
+            if (awsRegionValue != null && !awsRegionValue.trim().isEmpty()) {
+                return awsRegionValue;
+            }
+            
+            Trace.info("Região não configurada, usando padrão: us-east-1");
+            return "us-east-1"; // Default
+        } catch (Exception e) {
+            Trace.error("Erro ao processar região: " + e.getMessage());
+            return "us-east-1"; // Default
+        }
     }
 
     /**
      * Descobre scopes do Cognito
      */
     private Map<String, String> discoverScopesFromCognito(String userPoolId, String clientId) throws Exception {
+        // Validação explícita do cognitoClient
+        if (cognitoClient == null) {
+            throw new Exception("❌ ERRO DE INICIALIZAÇÃO: Cliente Cognito não foi inicializado. " +
+                "Possíveis causas: " +
+                "1) Credenciais AWS inválidas ou expiradas " +
+                "2) Região AWS incorreta " +
+                "3) Permissões IAM insuficientes " +
+                "4) Configuração de rede (proxy/firewall) " +
+                "5) Problema na configuração do filtro");
+        }
+
         Map<String, String> scopePrefixes = new HashMap<>();
 
         try {
+            Trace.info("Consultando Cognito - UserPool: " + userPoolId + ", Client: " + clientId);
+            
             DescribeUserPoolClientRequest clientRequest = new DescribeUserPoolClientRequest()
                     .withUserPoolId(userPoolId)
                     .withClientId(clientId);
@@ -426,8 +629,42 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             Trace.info("Total de scopes descobertos para Client " + clientId + ": " + scopePrefixes.size());
 
         } catch (Exception e) {
-            Trace.error("Erro ao descobrir scopes: " + e.getMessage());
-            throw e;
+            // Tratamento de erros específicos da AWS
+            String errorMessage = e.getMessage();
+            String errorType = e.getClass().getSimpleName();
+            
+            if (errorMessage != null) {
+                if (errorMessage.contains("UnauthorizedOperation") || errorMessage.contains("AccessDenied")) {
+                    throw new Exception("❌ ERRO DE PERMISSÃO: " + errorMessage + 
+                        ". Verifique se a role/usuário AWS tem permissões para: " +
+                        "cognito-idp:DescribeUserPoolClient, cognito-idp:ListResourceServers");
+                        
+                } else if (errorMessage.contains("InvalidUserPoolId") || errorMessage.contains("UserPoolNotFound")) {
+                    throw new Exception("❌ USER POOL INVÁLIDO: " + errorMessage + 
+                        ". Verifique se o User Pool ID '" + userPoolId + "' está correto e na região correta");
+                        
+                } else if (errorMessage.contains("InvalidClientId") || errorMessage.contains("ResourceNotFoundException")) {
+                    throw new Exception("❌ CLIENT ID INVÁLIDO: " + errorMessage + 
+                        ". Verifique se o Client ID '" + clientId + "' existe no User Pool '" + userPoolId + "'");
+                        
+                } else if (errorMessage.contains("CredentialsNotAvailable") || errorMessage.contains("Unable to load credentials")) {
+                    throw new Exception("❌ ERRO DE CREDENCIAIS: " + errorMessage + 
+                        ". Verifique a configuração das credenciais AWS (IAM role, arquivo de credenciais, etc.)");
+                        
+                } else if (errorMessage.contains("UnknownHost") || errorMessage.contains("Connection") || errorMessage.contains("timeout")) {
+                    throw new Exception("❌ ERRO DE CONECTIVIDADE: " + errorMessage + 
+                        ". Verifique conexão com a internet, proxy ou firewall");
+                        
+                } else if (errorMessage.contains("SignatureDoesNotMatch") || errorMessage.contains("InvalidSignature")) {
+                    throw new Exception("❌ ERRO DE ASSINATURA: " + errorMessage + 
+                        ". Verifique se as credenciais AWS estão corretas e não expiraram");
+                }
+            }
+            
+            // Erro genérico
+            Trace.error("Erro ao descobrir scopes (" + errorType + "): " + errorMessage);
+            throw new Exception("❌ ERRO AWS COGNITO (" + errorType + "): " + errorMessage + 
+                ". Verifique logs para mais detalhes");
         }
 
         return scopePrefixes;
@@ -475,11 +712,8 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             List<ResourceServerType> resourceServers = serversResult.getResourceServers();
 
             if (resourceServers == null || resourceServers.isEmpty()) {
-                Trace.info("Nenhum Resource Server encontrado no User Pool: " + userPoolId);
                 return null;
             }
-
-            Trace.info("Procurando scope simples '" + simpleScope + "' em " + resourceServers.size() + " Resource Servers");
 
             // Procurar o scope em todos os Resource Servers
             for (ResourceServerType server : resourceServers) {
@@ -488,18 +722,16 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                 if (server.getScopes() != null) {
                     for (ResourceServerScopeType serverScope : server.getScopes()) {
                         if (simpleScope.equals(serverScope.getScopeName())) {
-                            Trace.info("Scope '" + simpleScope + "' encontrado no Resource Server: " + serverIdentifier);
                             return serverIdentifier;
                         }
                     }
                 }
             }
 
-            Trace.info("Scope simples '" + simpleScope + "' não encontrado em nenhum Resource Server");
             return null;
 
         } catch (Exception e) {
-            Trace.error("Erro ao buscar Resource Server para scope simples '" + simpleScope + "': " + e.getMessage());
+            Trace.error("Erro ao buscar Resource Server para scope '" + simpleScope + "': " + e.getMessage());
             return null;
         }
     }
@@ -524,35 +756,43 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     /**
      * Processa scopes em batch com otimizações de string
      */
-    private void processScopesBatch(List<String> scopes, String userPoolId, String clientId, Map<String, String> scopePrefixes) {
+    private void processScopesBatch(List<String> scopes, String userPoolId, String clientId, Map<String, String> scopePrefixes) throws Exception {
+        int mappedCount = 0;
+        int errorCount = 0;
+        
         for (String scope : scopes) {
             // Otimização: usar indexOf em vez de split para melhor performance
             int slashIndex = scope.indexOf('/');
-            if (slashIndex > 0) {
+            if (slashIndex > 0) {   
                 // Scope já está no formato completo (resource-server/scope-name)
                 String resourceServerIdentifier = scope.substring(0, slashIndex);
                 String scopeName = scope.substring(slashIndex + 1);
                 // Mapear o scope simples para o scope completo
                 scopePrefixes.put(scopeName, scope);
-                Trace.info("Scope completo mapeado para Client " + clientId + ": " + scopeName + " -> " + scope);
+                mappedCount++;
             } else {
                 // Scope simples, descobrir qual Resource Server contém este scope
                 String prefix = findResourceServerForClientScope(userPoolId, clientId, scope);
                 if (prefix != null) {
                     scopePrefixes.put(scope, prefix + "/" + scope);
-                    Trace.info("Scope mapeado para Client " + clientId + ": " + scope + " -> " + prefix + "/" + scope);
+                    mappedCount++;
                 } else {
-                    scopePrefixes.put(scope, scope);
-                    Trace.info("Scope sem prefixo para Client " + clientId + ": " + scope);
+                    // Scope sem prefixo válido - erro ao invés de aceitar
+                    errorCount++;
+                    Trace.error("Scope sem Resource Server válido: " + scope);
+                    throw new Exception("invalid_scope: " + scope + " (não encontrado em nenhum Resource Server)");
                 }
             }
         }
+        
+        // Log consolidado ao final
+        Trace.info("Processamento de scopes concluído - Mapeados: " + mappedCount + ", Erros: " + errorCount);
     }
 
     /**
      * Mapeia scopes de entrada para scopes completos
      */
-    private String mapInputScopes(String scopesInput, Map<String, String> scopePrefixes) {
+    private String mapInputScopes(String scopesInput, Map<String, String> scopePrefixes) throws Exception {
         if (scopesInput == null || scopesInput.trim().isEmpty()) {
             return "";
         }
@@ -567,11 +807,23 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                 if (fullScope != null) {
                     mappedScopes.add(fullScope);
                 } else {
-                    // Fallback: add default prefix
-                    mappedScopes.add("my-api/" + cleanScope);
+                    // Scope não encontrado - retorna erro ao invés de fallback
+                    Trace.error("Scope inválido não encontrado: " + cleanScope);
+                    throw new Exception("invalid_scope: " + cleanScope);
                 }
             }
         }
         return String.join(" ", mappedScopes); // Formato esperado pelo Cognito
+    }
+
+    /**
+     * Gera um slug a partir do userPoolId
+     */
+    private String generateUserPoolIdSlug(String userPoolId) {
+        if (userPoolId == null || userPoolId.trim().isEmpty()) {
+            return "";
+        }
+        // Remove caracteres não alfanuméricos exceto hífens e converte para minúsculas
+        return userPoolId.toLowerCase().replaceAll("[^a-z0-9-]", "");
     }
 }
