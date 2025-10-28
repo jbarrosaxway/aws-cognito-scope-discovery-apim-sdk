@@ -58,6 +58,9 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     // Cliente Cognito
     private AWSCognitoIdentityProvider cognitoClient;
     
+    // Última região usada para inicializar o cliente
+    private String lastUsedRegion;
+    
     // Context and Entity for credentials
     private ConfigContext ctx;
     private Entity entity;
@@ -105,10 +108,17 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
             String userPoolIdValue = getUserPoolId().substitute(message);
             String clientIdValue = getClientId().substitute(message);
             String scopesInputValue = getScopesInput().substitute(message);
+            
+            // Debug: comparar valores raw do entity
+            String rawUserPoolId = entity.getStringValue("userPoolId");
+            String rawRegion = entity.getStringValue("awsRegion");
+            Trace.info("🔍 DEBUG - raw userPoolId: " + rawUserPoolId);
+            Trace.info("🔍 DEBUG - raw awsRegion: " + rawRegion);
+            
             String regionValue = getRegion(message);
             
             // Log essencial apenas
-            Trace.info("Iniciando descoberta de scopes - userPoolId: " + userPoolIdValue + ", clientId: " + clientIdValue);
+            Trace.info("Iniciando descoberta de scopes - userPoolId: " + userPoolIdValue + ", clientId: " + clientIdValue + ", região: " + regionValue);
             
             if (userPoolIdValue == null || userPoolIdValue.trim().isEmpty()) {
                 throw new IllegalArgumentException("userPoolId é obrigatório");
@@ -118,15 +128,28 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                 throw new IllegalArgumentException("clientId é obrigatório");
             }
 
-            // Verificar se o cliente Cognito foi inicializado corretamente
+            // Verificar se o cliente Cognito precisa ser inicializado ou reinicializado
+            boolean needReinit = false;
+            
             if (cognitoClient == null) {
-                Trace.info("Reinicializando cliente Cognito com região: " + regionValue);
+                Trace.info("Cliente Cognito não inicializado, inicializando com região: " + regionValue);
+                needReinit = true;
+            } else if (!regionValue.equals(lastUsedRegion)) {
+                Trace.info("⚠️ Mudança de região detectada! Última: " + lastUsedRegion + ", Nova: " + regionValue);
+                Trace.info("Reinicializando cliente Cognito com nova região");
+                needReinit = true;
+            }
+            
+            if (needReinit) {
                 initializeCognitoClient(regionValue);
                 
                 // Verificar novamente após tentativa de reinicialização
                 if (cognitoClient == null) {
                     throw new Exception("Não foi possível inicializar o cliente Cognito. Verifique as configurações de credenciais e região.");
                 }
+                
+                lastUsedRegion = regionValue;
+                Trace.info("✅ Cliente Cognito inicializado/reinicializado com sucesso para região: " + regionValue);
             }
 
             // Discover scopes from Cognito
@@ -221,6 +244,8 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                     .withClientConfiguration(clientConfig)
                     .build();
 
+            this.lastUsedRegion = "us-east-1"; // Registrar região usada
+            
             Trace.info("✅ Cliente Cognito inicializado com região padrão durante filterAttached");
 
         } catch (Exception e) {
@@ -572,16 +597,24 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
                 return "us-east-1";
             }
             
+            // Pegar o valor raw do entity para debug
+            String rawRegionValue = entity.getStringValue("awsRegion");
+            Trace.info("🔍 DEBUG REGIÃO - Valor raw da entity: " + rawRegionValue);
+            
             String awsRegionValue = awsRegionSelector.substitute(message);
+            Trace.info("🔍 DEBUG REGIÃO - Valor após substitute: " + awsRegionValue);
             
             if (awsRegionValue != null && !awsRegionValue.trim().isEmpty()) {
+                Trace.info("✅ Usando região configurada: " + awsRegionValue);
                 return awsRegionValue;
             }
             
-            Trace.info("Região não configurada, usando padrão: us-east-1");
+            Trace.info("⚠️ Região não configurada ou vazia, usando padrão: us-east-1");
+            Trace.info("⚠️ rawRegionValue=" + rawRegionValue + ", awsRegionValue=" + awsRegionValue);
             return "us-east-1"; // Default
         } catch (Exception e) {
-            Trace.error("Erro ao processar região: " + e.getMessage());
+            Trace.error("❌ Erro ao processar região: " + e.getMessage());
+            e.printStackTrace();
             return "us-east-1"; // Default
         }
     }
