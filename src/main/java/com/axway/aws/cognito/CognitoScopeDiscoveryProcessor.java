@@ -772,17 +772,43 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
 
 
     /**
-     * Processa scopes de entrada
+     * Normaliza e separa scopes de entrada (suporta vírgulas e espaços como separadores)
+     * 
+     * @param scopesInput String com scopes separados por vírgulas ou espaços
+     * @return Lista de scopes normalizados (sem espaços extras)
+     */
+    private List<String> parseScopes(String scopesInput) {
+        List<String> scopes = new ArrayList<>();
+        
+        if (scopesInput == null || scopesInput.trim().isEmpty()) {
+            return scopes;
+        }
+        
+        // Primeiro, normalizar: substituir vírgulas por espaços e depois fazer split por espaços múltiplos
+        String normalized = scopesInput.replace(',', ' ').trim();
+        
+        // Split por um ou mais espaços em branco
+        String[] parts = normalized.split("\\s+");
+        
+        for (String part : parts) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                scopes.add(trimmed);
+            }
+        }
+        
+        return scopes;
+    }
+
+    /**
+     * Processa scopes de entrada (suporta vírgulas e espaços como separadores)
      */
     private String processInputScopes(String scopesInput) {
         if (scopesInput == null || scopesInput.trim().isEmpty()) {
             return "";
         }
-        // Split by comma and clean up
-        String[] scopes = scopesInput.split(",");
-        for (int i = 0; i < scopes.length; i++) {
-            scopes[i] = scopes[i].trim();
-        }
+        
+        List<String> scopes = parseScopes(scopesInput);
         return String.join(", ", scopes);
     }
 
@@ -823,27 +849,25 @@ public class CognitoScopeDiscoveryProcessor extends MessageProcessor {
     }
 
     /**
-     * Mapeia scopes de entrada para scopes completos
+     * Mapeia scopes de entrada para scopes completos (suporta vírgulas e espaços como separadores)
      */
     private String mapInputScopes(String scopesInput, Map<String, String> scopePrefixes) throws Exception {
         if (scopesInput == null || scopesInput.trim().isEmpty()) {
             return "";
         }
-        // Split by comma, clean up, and map to full scopes
-        String[] scopes = scopesInput.split(",");
+        
+        // Usar o método auxiliar que suporta vírgulas e espaços
+        List<String> scopes = parseScopes(scopesInput);
         List<String> mappedScopes = new ArrayList<>();
         
-        for (String scope : scopes) {
-            String cleanScope = scope.trim();
-            if (!cleanScope.isEmpty()) {
-                String fullScope = scopePrefixes.get(cleanScope);
-                if (fullScope != null) {
-                    mappedScopes.add(fullScope);
-                } else {
-                    // Scope não encontrado - retorna erro ao invés de fallback
-                    Trace.error("Scope inválido não encontrado: " + cleanScope);
-                    throw new Exception("invalid_scope: " + cleanScope);
-                }
+        for (String cleanScope : scopes) {
+            String fullScope = scopePrefixes.get(cleanScope);
+            if (fullScope != null) {
+                mappedScopes.add(fullScope);
+            } else {
+                // Scope não encontrado - retorna erro ao invés de fallback
+                Trace.error("Scope inválido não encontrado: " + cleanScope);
+                throw new Exception("invalid_scope: " + cleanScope);
             }
         }
         return String.join(" ", mappedScopes); // Formato esperado pelo Cognito
